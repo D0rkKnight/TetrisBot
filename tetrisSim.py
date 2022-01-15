@@ -5,6 +5,7 @@ import numpy as np
 import random
 from pynput import keyboard
 import collections
+import time
 
 stackSize = (10, 20)
 grid = np.zeros(shape=stackSize, dtype=np.uint8)
@@ -33,6 +34,8 @@ baseRot =  [np.array([[0, 1, 0, 0],
                         [1, 1, 0],
                         [0, 1, 0]])
 ]
+
+rotVars = []
 
 spawnOffset = [-1, -1, -1, 0, -1, -1, -1]
 
@@ -141,6 +144,20 @@ def initSim():
     piecePos = genPieceSpawn(currentPiece)
 
     regenerateQueue()
+
+    # Flip pieces and initiallize piece rotations
+    for i in range(len(baseRot)):
+        bp = baseRot[i]
+        bp = np.flip(bp, axis=1)
+        baseRot[i] = bp
+
+        o = []
+
+        for r in range(4):
+            variant = np.rot90(bp, r, axes=(1, 0))
+            o.append(variant)
+        
+        rotVars.append(o)
     
     return
 
@@ -181,9 +198,7 @@ def runSim():
     return
 
 def getPGridFromID(id, rot):
-    pGrid = baseRot[id]
-    pGrid = np.flip(pGrid, axis=1)
-    pGrid = np.rot90(pGrid, rot, axes=(1, 0))
+    pGrid = rotVars[id][rot]
     return pGrid
 
 def executeHardDrop(pGrid, board, x):
@@ -292,8 +307,6 @@ def genPieceSpawn(piece):
     return (grid.shape[0] // 2 - 1 + spawnOffset[piece], grid.shape[1] - baseRot[piece].shape[1])
 
 def hasConflict(grid, pos, space):
-    #print(pos)
-
     for x in range(grid.shape[0]):
         for y in range(grid.shape[1]):
 
@@ -307,7 +320,7 @@ def hasConflict(grid, pos, space):
                     return True
                 if (space[nx, ny] > 0):
                     return True
-    
+
     return False
 
 def lineClear(grid):

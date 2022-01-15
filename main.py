@@ -1,10 +1,8 @@
-import win32gui
-import win32con
-import win32api
+
 import numpy as np
-from PIL import ImageGrab
 import collections
 import tetrisSim
+import tetrisVision
 
 import keyboard
 
@@ -22,12 +20,7 @@ ARD = 0.17
 ARS = 0.05
 ARC = 0.1 # compensation
 
-desktop = win32gui.GetDesktopWindow()
-screenDims = (1920.0, 1080.0)
 firstBlock = True
-currentPiece = ''
-hold = ''
-currentBoard = None
 logData = False
 
 INTERNAL_SIM = 0
@@ -35,21 +28,13 @@ SCREEN_CAPTURE = 1
 source = INTERNAL_SIM
 hasInputLag = False
 
-# Build piece library
-baseRot = tetrisSim.baseRot
-spawnOffset = tetrisSim.spawnOffset
-
 MoveInput = collections.namedtuple('MoveInput', 'delta rot board score lineclears piece')
 
 def main():
-    global currentPiece, currentBoard, hold
-
     if source == INTERNAL_SIM:
         tetrisSim.init(calculate)
 
 def calculate():
-    global currentBoard, currentPiece
-
     if keyboard.is_pressed('esc'):
         return
     
@@ -59,7 +44,7 @@ def calculate():
 
     # Screengrab for positioning
     if keyboard.is_pressed('1'):
-        img = pollScreen() 
+        img = tetrisVision.pollScreen() 
         img.show()
 
     if not started:
@@ -69,7 +54,7 @@ def calculate():
 
     if source == SCREEN_CAPTURE:
         # Game code loop
-        img = pollScreen()
+        img = tetrisVision.pollScreen()
         #img.show()
 
         # Grab grid contents
@@ -77,7 +62,7 @@ def calculate():
         blockStack = img.crop((xPad, 50, img.width-xPad, img.height-50))
 
         gridDims = (10, 20)
-        grid = pixelsToGrid(blockStack, gridDims, 50)
+        grid = tetrisVision.pixelsToGrid(blockStack, gridDims, 50)
         blockSize = blockStack.width/float(gridDims[0])
 
         # Flip and format grid
@@ -85,40 +70,40 @@ def calculate():
         grid = grid[:grid.shape[0], :grid.shape[1]-topMargin] # Trim the board as to not capture the falling piece
 
         # Read Queue
-        queue = readQueue(img, blockSize)
+        queue = tetrisVision.readQueue(img, blockSize)
     
     elif source == INTERNAL_SIM:
         grid = np.copy(tetrisSim.grid)
         queue = np.copy(tetrisSim.queue)
 
+    ridge = genRidge(grid)
+
     # Check for misinputs
-    if (currentBoard is not None) and not np.array_equal(grid, currentBoard):
-        log("MISINPUT: Delta between the following boards. 1: detected board 2: expected board")
-        logGrid(grid)
-        logGrid(currentBoard)
-        log()
+    # if (currentBoard is not None) and not np.array_equal(grid, currentBoard):
+    #     log("MISINPUT: Delta between the following boards. 1: detected board 2: expected board")
+    #     logGrid(grid)
+    #     logGrid(currentBoard)
+    #     log()
 
     # Place a block
     global firstBlock 
     if firstBlock:
         hardDrop()
-        currentPiece = queue[0]
         firstBlock = False
         return
     
-    if hold == '':
-        holdPiece(currentPiece)
-        currentPiece = queue[0]
+    if tetrisSim.hold == '':
+        holdPiece()
         return
 
     # Position block
-    # inputs = chainMove({'queue' : [currentPiece, queue[0]], 'hold' : hold}, grid)
-    inputs = chainMove({'queue' : [currentPiece], 'hold' : hold}, grid)
+    # inputs = chainMove({'queue' : [currentPiece, queue[0]], 'hold' : tetrisSim.hold}, grid)
+    inputs = chainMove({'queue' : [tetrisSim.currentPiece], 'hold' : tetrisSim.hold}, {'contents' : grid, 'ridge' : ridge})
 
-    if inputs.piece != currentPiece: # Means it was swapped for a hold
-        log("Current piece before hold: " + str(currentPiece))
-        log("Held piece before hold: " + str(hold))
-        holdPiece(currentPiece)
+    if inputs.piece != tetrisSim.currentPiece: # Means it was swapped for a hold
+        log("Current piece before hold: " + str(tetrisSim.currentPiece))
+        log("Held piece before hold: " + str(tetrisSim.hold))
+        holdPiece()
         log("")
     
     # Print queue
@@ -131,36 +116,7 @@ def calculate():
     if inputs.lineclears > 0:
         wait(lineclearLatency)
 
-    currentPiece = tetrisSim.currentPiece
-    currentBoard = inputs.board
-
     report(inputs)
-
-def pollScreen():
-    # Capture entire playspace
-    taskBarW = 65
-    xPad = 0.25
-    yPad = 0.15
-    left = (screenDims[0] - taskBarW) * xPad + taskBarW
-    right = (screenDims[0] - taskBarW) * (1-xPad) + taskBarW
-    top = screenDims[1] * yPad
-    bottom = screenDims[1] * (1-yPad)
-
-    img = ImageGrab.grab((left, top, right, bottom))
-
-    return img
-
-def pixelsToGrid(img, gDims, cutoff):
-    grid = np.zeros(shape=gDims, dtype=np.uint8)
-    for x in range(gDims[0]):
-        for y in range(gDims[1]):
-            scrnCord = ((float(x) + 0.5) / gDims[0] * img.width, 
-                        (float(y) + 0.5) / gDims[1] * img.height)
-            pixel = img.getpixel(scrnCord)
-
-            if (sum(pixel) > cutoff):
-                grid[x, y] = 1
-    return grid
 
 def printGrid(grid):
     print()
@@ -175,38 +131,6 @@ def printGrid(grid):
             line += o
         print(line)
 
-def readQueue(img, blockSize, log=False):
-    # Grab queue contents
-    upperLeft = (735, 145)
-    padding = 20
-    gQ = []
-    for i in range(3):
-        q = img.crop((upperLeft[0], upperLeft[1] + blockSize*2*i + padding * i, 
-                    upperLeft[0] + blockSize*3, upperLeft[1] + blockSize*2*(i+1) + padding * i))
-        qGrid = pixelsToGrid(q, (3, 2), 120)
-        gQ.append(qGrid)
-    
-    # Extract piece type
-    pQueue = []
-    for g in gQ:
-        square = np.hstack([g, np.zeros(shape=(g.shape[0], 1), dtype=np.uint8)])
-        
-        selected = False
-        
-        for key in baseRot.keys():
-            if (np.array_equal(square, baseRot[key])):
-                pQueue.append(key)
-                selected = True
-                break
-        
-        if np.array_equal(square, [[0, 0, 0], [1, 1, 0], [1, 1, 0]]):
-            pQueue.append('O')
-            selected = True
-
-        if not selected: 
-            pQueue.append('I')
-    return pQueue
-
 def hardDrop():
     if source == SCREEN_CAPTURE:
         ping('Space')
@@ -218,12 +142,7 @@ def hardDrop():
     wait(hardDropLatency)
     return
 
-def holdPiece(piece):
-    global hold, currentPiece
-    o = hold
-    hold = piece
-    currentPiece = o
-
+def holdPiece():
     if source == SCREEN_CAPTURE:
         ping('c')
     elif source == INTERNAL_SIM:
@@ -231,8 +150,6 @@ def holdPiece(piece):
         tetrisSim.runSim()
     
     wait(holdLatency)
-    
-    return o
 
 def move(delta, rot):
     if source == SCREEN_CAPTURE:
@@ -283,9 +200,6 @@ def chainMove(inHand, board):
     # Make an arbitrary move
 
     if len(hand['queue']) > 0:
-        pGrid = baseRot[nextMove]
-        pGrid = np.flip(pGrid, 1) # Flip piece as well, so it is in the 1st quadrant
-
         maxScore = -100000
         bestSpot = 0
         bestRot = 0
@@ -293,9 +207,9 @@ def chainMove(inHand, board):
         blc = None
 
 
-        for x in range(-2, board.shape[0]):
+        for x in range(-2, board['contents'].shape[0]):
             for r in range(4):
-                lc = genHypoBoard(board, pGrid, x, r)
+                lc = genHypoBoard(board['contents'], nextMove, x, r)
                 if lc is None:
                     continue
                 hypoBoard = lc['board']
@@ -326,8 +240,7 @@ def chainMove(inHand, board):
                     bestBoard = hypoBoard
                     blc = lc
 
-        spawnPos = board.shape[0] // 2 - 1 + spawnOffset[nextMove]
-
+        spawnPos = tetrisSim.genPieceSpawn(nextMove)
         delta = bestSpot - spawnPos
 
         lineClears = 0
@@ -340,13 +253,13 @@ def chainMove(inHand, board):
         # Just scoring, not actually updating the hold
         s1 = positionPiece(nextMove, board)
         s2 = positionPiece(hand['hold'], board)
+
         if  s1.score > s2.score:
             return s1
         return s2
 
 def positionPiece(piece, board):
-    pGrid = baseRot[piece]
-    pGrid = np.flip(pGrid, 1) # Flip piece as well, so it is in the 1st quadrant
+    start = time.time()
 
     # Try it in every location for validity
     maxScore = -100000
@@ -354,17 +267,19 @@ def positionPiece(piece, board):
     bestRot = 0
     bestBoard = None
     blc = None
-    for x in range(-2, board.shape[0]):
+    for x in range(-2, board['contents'].shape[0]):
 
         # Rotations as well
         for r in range(4):
-            lc = genHypoBoard(board, pGrid, x, r)
+            lc = genHypoBoard(board, piece, x, r)
             if lc is None:
                 continue
+
             hypoBoard = lc['board']
 
             # Generate ridge
             ridge = genRidge(hypoBoard)
+
 
             score = 0
             score += testPeaks(hypoBoard, ridge) * 1
@@ -377,89 +292,65 @@ def positionPiece(piece, board):
                 maxScore = score
                 bestSpot = x
                 bestRot = r
-                bestBoard = hypoBoard
+                bestBoard = {'contents' : hypoBoard, 'ridge' : ridge}
                 blc = lc
+            
+            
     
     # Calculate deltas from the best spot
-    spawnPos = board.shape[0] // 2 - 1 + spawnOffset[piece]
-    delta = bestSpot - spawnPos
+    spawnPos = tetrisSim.genPieceSpawn(piece)
+    delta = bestSpot - spawnPos[0]
 
     lineClears = 0
     if blc is not None:
         lineClears = blc['clears']
+    
+    
+    print(time.time() - start)
 
     return MoveInput(delta, bestRot, bestBoard, maxScore, lineClears, piece)
 
-def genHypoBoard(board, pGrid, x, r):
-    rotGrid = np.rot90(pGrid, r, axes=(1, 0))
+def genHypoBoard(board, piece, x, r):
+    rotGrid = tetrisSim.rotVars[piece][r]
 
     # Find lowest valid position
-    y = board.shape[1] - rotGrid.shape[1] # Starts from the top
-    conflict = hasConflict(rotGrid, (x, y), board)
+    # Estimate top of ridge
+    y = 0
+    for i in range(max(0, x), min(board['contents'].shape[0], x + rotGrid.shape[0])):
+        y = max(y, board['ridge'][i] + 1)
+    
+    # Is the start valid?
+    conflict = tetrisSim.hasConflict(rotGrid, (x, y), board['contents'])
 
     # Abort if current spot is taken 
     if (conflict):
         return None
 
+    i = 0
     while not conflict:
-        conflict = hasConflict(rotGrid, (x, y-1), board)
+        i += 1
+        conflict = tetrisSim.hasConflict(rotGrid, (x, y-1), board['contents'])
 
         if not conflict:
             y -= 1
 
+    print(i)
+
     # Create hypothetical board
-    hypoBoard = np.copy(board)
+    hypoBoard = np.copy(board['contents'])
     for lx in range(rotGrid.shape[0]):
         for ly in range(rotGrid.shape[1]):
             if (rotGrid[lx, ly] > 0):
                 hypoBoard[x+lx, y+ly] = rotGrid[lx, ly]
 
-    lc = lineClear(hypoBoard)
+    lc = tetrisSim.lineClear(hypoBoard)
     return lc
-
-def hasConflict(grid, pos, space):
-    for x in range(grid.shape[0]):
-        for y in range(grid.shape[1]):
-
-            if (grid[x, y] > 0):
-                 
-                nx = pos[0] + x
-                ny = pos[1] + y
-                if (nx < 0 or nx >= space.shape[0]):
-                    return True
-                if (ny < 0 or ny >= space.shape[1]):
-                    return True
-                if (space[nx, ny] > 0):
-                    return True
-    
-    return False
-
-def lineClear(grid):
-    postClear = np.zeros(shape=grid.shape, dtype=np.uint8)
-    linesCleared = 0
-
-    for y in range(grid.shape[1]):
-        fullRow = True
-
-        for x in range(grid.shape[0]):
-            if grid[x, y] == 0:
-                fullRow = False
-            #fullRow = grid[x, y] > 0 and fullRow
-        
-        if fullRow:
-            linesCleared += 1
-        else:
-            # put line into post clear grid
-            for x in range(grid.shape[0]):
-                postClear[x, y - linesCleared] = grid[x, y]
-
-    return {'board' : postClear, 'clears' : linesCleared}
 
 def genRidge(grid):
     o = []
     for col in grid:
         i = len(col)-1
-        while col[i] == 0 and i > 0:
+        while col[i] == 0 and i >= 0:
             i -= 1
     
         o.append(i)
@@ -515,7 +406,7 @@ def report(data):
     log(data.board)
     log('^ Board should be')
     log('Piece: '+str(data.piece))
-    log("Hold is: " + str(hold))
+    log("Hold is: " + str(tetrisSim.hold))
     log('_'*20)
 
 def log(str=""):
