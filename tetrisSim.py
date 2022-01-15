@@ -340,9 +340,7 @@ def lineClear(grid):
         fullRow = True
 
         for x in range(grid.shape[0]):
-            if grid[x, y] == 0:
-                fullRow = False
-            #fullRow = grid[x, y] > 0 and fullRow
+            fullRow = grid[x, y] > 0 and fullRow
         
         if fullRow:
             linesCleared += 1

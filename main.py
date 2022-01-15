@@ -140,7 +140,7 @@ def calculate():
     holes = findHoles(grid)
 
     # Position block
-    #inputs = chainMove({'queue' : [tetrisSim.currentPiece, queue[0]], 'hold' : tetrisSim.hold}, 
+    # inputs = chainMove({'queue' : [tetrisSim.currentPiece, queue[0]], 'hold' : tetrisSim.hold}, 
     #       {'contents' : grid, 'ridge' : ridge, 'holes' : holes})
     inputs = chainMove({'queue' : [tetrisSim.currentPiece], 'hold' : tetrisSim.hold}, 
             {'contents' : grid, 'ridge' : ridge, 'holes' : holes})
@@ -253,12 +253,13 @@ def chainMove(inHand, board):
 
         for x in range(-2, board['contents'].shape[0]):
             for r in range(4):
-                lc = genHypoBoard(board, nextMove, x, r)
-                if lc is None:
+                result = genHypoBoard(board, nextMove, x, r)
+                if result is None:
                     continue
-                hypoGrid = lc['board']
-                ridge = genRidge(hypoGrid)
-                nextBoard = {'contents' : hypoGrid, 'ridge' : ridge}
+                hypoGrid = result['board']
+                ridge = result['ridge']
+                holes = board['holes'] + result['hole delta']
+                nextBoard = {'contents' : hypoGrid, 'ridge' : ridge, 'holes' : holes}
 
                 # Create alternate queue that has a hold swap
                 newHold = hand['queue'][0]
@@ -281,7 +282,7 @@ def chainMove(inHand, board):
                     bestSpot = x
                     bestRot = r
                     bestBoard = nextBoard
-                    blc = lc
+                    blc = result
 
         spawnPos = tetrisSim.genPieceSpawn(nextMove)
         delta = bestSpot - spawnPos[0]
@@ -327,10 +328,10 @@ def positionPiece(piece, board):
             holes = results['hole delta'] + board['holes']
 
             score = 0
-            score += testPeaks(hypoBoard, ridge) * 1
-            score += testHoles(holes) * -5
-            score += testPits(hypoBoard, ridge)
-            score += stackBuilder(results['clears']) * 8
+            score += testPeaks(ridge) * 1
+            score += testHoles(holes) * -10
+            score += testPits(ridge)
+            score += stackBuilder(results['clears']) * 10
             score += tetrisFinder(results['clears']) * 40
 
             if score > maxScore:
@@ -384,6 +385,7 @@ def genHypoBoard(board, piece, x, r):
         return None
 
     # Create hypothetical board
+    # Needed for future reading
     hypoBoard = np.copy(bGrid)
     for lx in range(rotGrid.shape[0]):
         for ly in range(rotGrid.shape[1]):
@@ -391,6 +393,7 @@ def genHypoBoard(board, piece, x, r):
                 hypoBoard[x+lx, y+ly] = rotGrid[lx, ly]
 
     lc = tetrisSim.lineClear(hypoBoard)
+
 
     # Counting holes
     holesMade = 0
@@ -412,10 +415,6 @@ def genHypoBoard(board, piece, x, r):
 
         # Update ridge since we already have the y value
         newRidge[col] = y + ridgeDelta - 1
-
-        
-
-    
 
     lines = lc['lines']
     for x in range(len(newRidge)):
@@ -452,9 +451,9 @@ def genRidge(grid):
     return o
 
 # Evaluate score on the highest points
-def testPeaks(grid, ridge):
+def testPeaks(ridge):
     peak = max(ridge)
-    return grid.shape[1] - peak
+    return -peak
 
 # Doesn't do anything ig
 def testHoles(holes):
@@ -478,7 +477,7 @@ def findHoles(grid):
 
     return o
 
-def testPits(grid, ridge):
+def testPits(ridge):
     o = 0
 
     for i in range(1, len(ridge)):
