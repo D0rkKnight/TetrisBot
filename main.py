@@ -30,9 +30,33 @@ hasInputLag = False
 
 MoveInput = collections.namedtuple('MoveInput', 'delta rot board score lineclears piece')
 
+tetroMarginBuffer = []
+
 def main():
     if source == INTERNAL_SIM:
-        tetrisSim.init(calculate)
+        tetrisSim.init(init, calculate)
+
+def init():
+        # Generate marginal buffers
+    for piece in tetrisSim.rotVars:
+        pieceBuff = []
+        for rot in piece:
+            rotBuff = []
+            for x in range(rot.shape[0]):
+
+                # March upwards
+                alt = -1 # buffer in distance, -1 means no cell in the column.
+
+                for y in range(rot.shape[1]):
+                    if rot[x, y] > 0:
+                        alt = y
+                        break
+                
+                rotBuff.append(alt)
+            
+            pieceBuff.append(rotBuff)
+        
+        tetroMarginBuffer.append(pieceBuff)
 
 def calculate():
     if keyboard.is_pressed('esc'):
@@ -125,7 +149,7 @@ def printGrid(grid):
         y = grid.shape[1]-y- 1
         line = ''
         for x in range(shp[0]):
-            o = " "
+            o = '_'
             if grid[x, y] > 0:
                 o = "O"
             line += o
@@ -312,29 +336,30 @@ def positionPiece(piece, board):
 
 def genHypoBoard(board, piece, x, r):
     rotGrid = tetrisSim.rotVars[piece][r]
+    bGrid = board['contents']
 
     # Find lowest valid position
     # Estimate top of ridge
-    y = 0
-    for i in range(max(0, x), min(board['contents'].shape[0], x + rotGrid.shape[0])):
-        y = max(y, board['ridge'][i] + 1)
-    
-    # Is the start valid?
-    conflict = tetrisSim.hasConflict(rotGrid, (x, y), board['contents'])
+    y = -2
+    conflict = False
+    for i in range(rotGrid.shape[0]):
+        col = x + i
+        colMargin = tetroMarginBuffer[piece][r][i]
+        if colMargin < 0:
+            continue
+
+        if col < 0 or col >= bGrid.shape[0]:
+            # Out of bounds!
+            conflict = True
+            break
+
+        colTop = board['ridge'][col] + 1 - colMargin
+
+        y = max(y, colTop)
 
     # Abort if current spot is taken 
-    if (conflict):
+    if conflict or y > bGrid.shape[1] - rotGrid.shape[1]:
         return None
-
-    i = 0
-    while not conflict:
-        i += 1
-        conflict = tetrisSim.hasConflict(rotGrid, (x, y-1), board['contents'])
-
-        if not conflict:
-            y -= 1
-
-    print(i)
 
     # Create hypothetical board
     hypoBoard = np.copy(board['contents'])

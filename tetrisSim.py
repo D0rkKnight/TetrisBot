@@ -51,8 +51,13 @@ hardDropQueued = False
 lockQueued = False
 holdQueued = False
 
-def init(cb):
+forcePiece = None # Hijacking purposes
+
+def init(cbI=None, cbL=None):
     initSim()
+
+    if cbI is not None:
+        cbI()
 
     # Hook input
     listener = keyboard.Listener(on_press=onPress)
@@ -135,8 +140,8 @@ def init(cb):
 
         pygame.display.update()
 
-        if cb is not None:
-            cb()
+        if cbL is not None:
+            cbL()
 
 def initSim():
     global currentPiece, queue, piecePos
@@ -296,6 +301,9 @@ def drawPiece():
         random.shuffle(bag)
     
     o = bag.pop(0)
+
+    if forcePiece is not None:
+        return forcePiece
 
     return o
 
