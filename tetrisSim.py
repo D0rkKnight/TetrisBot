@@ -334,6 +334,7 @@ def hasConflict(grid, pos, space):
 def lineClear(grid):
     postClear = np.zeros(shape=grid.shape, dtype=np.uint8)
     linesCleared = 0
+    lines = []
 
     for y in range(grid.shape[1]):
         fullRow = True
@@ -345,12 +346,13 @@ def lineClear(grid):
         
         if fullRow:
             linesCleared += 1
+            lines.append(y)
         else:
             # put line into post clear grid
             for x in range(grid.shape[0]):
                 postClear[x, y - linesCleared] = grid[x, y]
 
-    return {'board' : postClear, 'clears' : linesCleared}
+    return {'board' : postClear, 'clears' : linesCleared, 'lines' : lines}
 
 if __name__ == '__main__':
     init(None)
