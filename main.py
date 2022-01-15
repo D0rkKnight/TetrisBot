@@ -4,6 +4,7 @@ import win32api
 import numpy as np
 from PIL import ImageGrab
 import collections
+import tetrisSim
 
 import keyboard
 
@@ -16,6 +17,7 @@ latency = 0.1
 hardDropLatency = 0.4 # Queue needs time to update, for example
 lineclearLatency = 1
 holdLatency = 0.2
+latencyOn = False
 ARD = 0.17
 ARS = 0.05
 ARC = 0.1 # compensation
@@ -26,54 +28,46 @@ firstBlock = True
 currentPiece = ''
 hold = ''
 currentBoard = None
+logData = False
+
+INTERNAL_SIM = 0
+SCREEN_CAPTURE = 1
+source = INTERNAL_SIM
+hasInputLag = False
 
 # Build piece library
-pieces = {}
-baseRot =  {'I' : [[0, 1, 0, 0],
-                  [0, 1, 0, 0],
-                  [0, 1, 0, 0],
-                  [0, 1, 0, 0]],
-            'J' : [[1, 1, 0],
-                  [0, 1, 0],
-                  [0, 1, 0]],
-            'L' : [[0, 1, 0],
-                  [0, 1, 0],
-                  [1, 1, 0]],
-            'O' : [[1, 1],
-                  [1, 1]],
-            'S' : [[0, 1, 0],
-                  [1, 1, 0],
-                  [1, 0, 0]],
-            'T' : [[0, 1, 0],
-                  [1, 1, 0],
-                  [0, 1, 0]],
-            'Z' : [[1, 0, 0],
-                  [1, 1, 0],
-                  [0, 1, 0]]
-        }
-spawnOffset = {'I' : -1, 'J' : -1, 'L' : -1, 'O' : 0, 'S' : -1, 'T' : -1, 'Z' : -1}
+baseRot = tetrisSim.baseRot
+spawnOffset = tetrisSim.spawnOffset
 
 MoveInput = collections.namedtuple('MoveInput', 'delta rot board score lineclears piece')
 
 def main():
     global currentPiece, currentBoard, hold
 
-    while True:
-        if keyboard.is_pressed('esc'):
-            break
-        
-        global started
-        if keyboard.is_pressed('`'):
-            started = True
+    if source == INTERNAL_SIM:
+        tetrisSim.init(calculate)
 
-        # Screengrab for positioning
-        if keyboard.is_pressed('1'):
-            img = pollScreen() 
-            img.show()
+def calculate():
+    global currentBoard, currentPiece
 
-        if not started:
-            continue
+    if keyboard.is_pressed('esc'):
+        return
+    
+    global started
+    if keyboard.is_pressed('`'):
+        started = True
 
+    # Screengrab for positioning
+    if keyboard.is_pressed('1'):
+        img = pollScreen() 
+        img.show()
+
+    if not started:
+        return
+    
+    grid = None; queue = None
+
+    if source == SCREEN_CAPTURE:
         # Game code loop
         img = pollScreen()
         #img.show()
@@ -90,55 +84,57 @@ def main():
         grid = np.flip(grid, 1)
         grid = grid[:grid.shape[0], :grid.shape[1]-topMargin] # Trim the board as to not capture the falling piece
 
-        # Check for misinputs
-        if (currentBoard is not None) and not np.array_equal(grid, currentBoard):
-            print("MISINPUT: Delta between the following boards. 1: detected board 2: expected board")
-            printGrid(grid)
-            printGrid(currentBoard)
-            print()
-
         # Read Queue
         queue = readQueue(img, blockSize)
+    
+    elif source == INTERNAL_SIM:
+        grid = np.copy(tetrisSim.grid)
+        queue = np.copy(tetrisSim.queue)
 
-        # Place a block
-        global firstBlock 
-        if firstBlock:
-            hardDrop()
-            currentPiece = queue.pop(0)
-            firstBlock = False
-            continue
-        
-        if hold == '':
-            holdPiece(currentPiece)
-            currentPiece = queue.pop(0)
-            continue
+    # Check for misinputs
+    if (currentBoard is not None) and not np.array_equal(grid, currentBoard):
+        log("MISINPUT: Delta between the following boards. 1: detected board 2: expected board")
+        logGrid(grid)
+        logGrid(currentBoard)
+        log()
 
-        # Position block
-        # inputs = chainMove({'queue' : [currentPiece, queue[0]], 'hold' : hold}, grid)
-        inputs = chainMove({'queue' : [currentPiece], 'hold' : hold}, grid)
-
-        if inputs.piece != currentPiece: # Means it was swapped for a hold
-            print("Current piece before hold: " + currentPiece)
-            print("Held piece before hold: " + hold)
-            holdPiece(currentPiece)
-            print()
-        
-        # Print queue
-        for i in range(3):
-            print('Element ' + str(i) + ' of queue is ' + queue[i])
-
-        move(inputs.delta, inputs.rot)
+    # Place a block
+    global firstBlock 
+    if firstBlock:
         hardDrop()
+        currentPiece = queue[0]
+        firstBlock = False
+        return
+    
+    if hold == '':
+        holdPiece(currentPiece)
+        currentPiece = queue[0]
+        return
 
-        if inputs.lineclears > 0:
-            time.sleep(lineclearLatency)
+    # Position block
+    # inputs = chainMove({'queue' : [currentPiece, queue[0]], 'hold' : hold}, grid)
+    inputs = chainMove({'queue' : [currentPiece], 'hold' : hold}, grid)
 
-        currentPiece = queue.pop(0)
-        currentBoard = inputs.board
+    if inputs.piece != currentPiece: # Means it was swapped for a hold
+        log("Current piece before hold: " + str(currentPiece))
+        log("Held piece before hold: " + str(hold))
+        holdPiece(currentPiece)
+        log("")
+    
+    # Print queue
+    for i in range(len(queue)):
+        log('Element ' + str(i) + ' of queue is ' + str(queue[i]))
 
-        report(inputs)
-        
-    return
+    move(inputs.delta, inputs.rot)
+    hardDrop()
+
+    if inputs.lineclears > 0:
+        wait(lineclearLatency)
+
+    currentPiece = tetrisSim.currentPiece
+    currentBoard = inputs.board
+
+    report(inputs)
 
 def pollScreen():
     # Capture entire playspace
@@ -194,34 +190,32 @@ def readQueue(img, blockSize, log=False):
     pQueue = []
     for g in gQ:
         square = np.hstack([g, np.zeros(shape=(g.shape[0], 1), dtype=np.uint8)])
-        if log:
-            printGrid(square)
         
         selected = False
         
         for key in baseRot.keys():
             if (np.array_equal(square, baseRot[key])):
                 pQueue.append(key)
-                if log:
-                    print(key)
                 selected = True
                 break
         
         if np.array_equal(square, [[0, 0, 0], [1, 1, 0], [1, 1, 0]]):
             pQueue.append('O')
-            if log:
-                print('O')
             selected = True
 
         if not selected: 
             pQueue.append('I')
-            if log:
-                print('I')
     return pQueue
 
 def hardDrop():
-    ping('Space')
-    time.sleep(hardDropLatency)
+    if source == SCREEN_CAPTURE:
+        ping('Space')
+        
+    elif source == INTERNAL_SIM:
+        tetrisSim.hardDrop()
+        tetrisSim.runSim()
+    
+    wait(hardDropLatency)
     return
 
 def holdPiece(piece):
@@ -230,33 +224,56 @@ def holdPiece(piece):
     hold = piece
     currentPiece = o
 
-    ping('c')
-    time.sleep(holdLatency)
+    if source == SCREEN_CAPTURE:
+        ping('c')
+    elif source == INTERNAL_SIM:
+        tetrisSim.holdPiece()
+        tetrisSim.runSim()
+    
+    wait(holdLatency)
+    
     return o
 
 def move(delta, rot):
-    if rot == 1:
-        ping('up')
-    if rot == 2:
-        ping('up')
-        ping('up')
-    if rot == 3:
-        ping('z')
+    if source == SCREEN_CAPTURE:
+        if rot == 1:
+            ping('up')
+        if rot == 2:
+            ping('up')
+            ping('up')
+        if rot == 3:
+            ping('z')
 
-    if delta != 0:
-        key = 'right'
-        if delta < 0:
-            key = 'left'
-        
-        absDelta = abs(delta)
-        while absDelta > 0:
-            ping(key)
-            absDelta -= 1
+        if delta != 0:
+            key = 'right'
+            if delta < 0:
+                key = 'left'
+            
+            absDelta = abs(delta)
+            while absDelta > 0:
+                ping(key)
+                absDelta -= 1
+    
+    elif source == INTERNAL_SIM:
+        # Force game ticks
+        if rot == 1:
+            tetrisSim.rotateBy(1)
+            tetrisSim.runSim()
+        elif rot == 2:
+            tetrisSim.rotateBy(2)
+            tetrisSim.runSim()
+        elif rot == 3:
+            tetrisSim.rotateBy(-1)
+            tetrisSim.runSim()
+
+        if delta != 0:
+            tetrisSim.shiftBy(delta)
+            tetrisSim.runSim()
         
 
 def ping(key):
     keyboard.press_and_release(key)
-    time.sleep(latency)
+    wait(latency)
 
 def chainMove(inHand, board):
     hand = {'queue' : inHand['queue'].copy(), 'hold' : inHand['hold']}
@@ -268,7 +285,6 @@ def chainMove(inHand, board):
     if len(hand['queue']) > 0:
         pGrid = baseRot[nextMove]
         pGrid = np.flip(pGrid, 1) # Flip piece as well, so it is in the 1st quadrant
-
 
         maxScore = -100000
         bestSpot = 0
@@ -310,7 +326,8 @@ def chainMove(inHand, board):
                     bestBoard = hypoBoard
                     blc = lc
 
-        spawnPos = board.shape[0] / 2 - 1 + spawnOffset[nextMove]
+        spawnPos = board.shape[0] // 2 - 1 + spawnOffset[nextMove]
+
         delta = bestSpot - spawnPos
 
         lineClears = 0
@@ -350,10 +367,10 @@ def positionPiece(piece, board):
             ridge = genRidge(hypoBoard)
 
             score = 0
-            score += testPeaks(hypoBoard, ridge)
+            score += testPeaks(hypoBoard, ridge) * 1
             score += testHoles(hypoBoard) * 5
             score += testPits(hypoBoard, ridge)
-            score += stackBuilder(lc['clears']) * 10
+            score += stackBuilder(lc['clears']) * 8
             score += tetrisFinder(lc['clears']) * 40
 
             if score > maxScore:
@@ -364,7 +381,7 @@ def positionPiece(piece, board):
                 blc = lc
     
     # Calculate deltas from the best spot
-    spawnPos = board.shape[0] / 2 - 1 + spawnOffset[piece]
+    spawnPos = board.shape[0] // 2 - 1 + spawnOffset[piece]
     delta = bestSpot - spawnPos
 
     lineClears = 0
@@ -375,7 +392,6 @@ def positionPiece(piece, board):
 
 def genHypoBoard(board, pGrid, x, r):
     rotGrid = np.rot90(pGrid, r, axes=(1, 0))
-    # printGrid(rotGrid)
 
     # Find lowest valid position
     y = board.shape[1] - rotGrid.shape[1] # Starts from the top
@@ -494,12 +510,24 @@ def tetrisFinder(lineClears):
     return 0
 
 def report(data):
-    print('delta: '+str(data.delta))
-    print('rot: '+str(data.rot))
-    printGrid(data.board)
-    print('^ Board should be')
-    print('Piece: '+data.piece)
-    print("Hold is: " +  hold)
-    print('_'*20)
+    log('delta: '+str(data.delta))
+    log('rot: '+str(data.rot))
+    log(data.board)
+    log('^ Board should be')
+    log('Piece: '+str(data.piece))
+    log("Hold is: " + str(hold))
+    log('_'*20)
+
+def log(str=""):
+    if logData:
+        print(str)
+
+def logGrid(grid):
+    if logData:
+        printGrid(grid)
+
+def wait(amt):
+    if latencyOn:
+        time.sleep(amt)
 
 main()
