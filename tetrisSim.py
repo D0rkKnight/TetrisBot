@@ -331,7 +331,19 @@ def hasConflict(grid, pos, space):
 
     return False
 
-def lineClear(grid):
+def lineClear(grid, sat=None):
+
+    # Test to see if grid traversal is necessary
+    if sat is not None:
+        hasLC = False
+        for i in sat:
+            if i >= grid.shape[0]:
+                hasLC = True
+                break
+
+        if not hasLC:
+            return {'board' : grid, 'clears' : 0, 'lines' : []}
+
     postClear = np.zeros(shape=grid.shape, dtype=np.uint8)
     linesCleared = 0
     lines = []

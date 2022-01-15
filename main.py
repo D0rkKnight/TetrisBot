@@ -20,6 +20,8 @@ ARD = 0.17
 ARS = 0.05
 ARC = 0.1 # compensation
 
+searchDepth = 2
+
 firstBlock = True
 logData = False
 
@@ -28,7 +30,7 @@ SCREEN_CAPTURE = 1
 source = INTERNAL_SIM
 hasInputLag = False
 
-MoveInput = collections.namedtuple('MoveInput', 'delta rot board score lineclears piece')
+MoveInput = collections.namedtuple('MoveInput', 'delta rot board score iScore lineclears piece')
 
 tetroMarginBuffer = []
 tetroRidgeBuffer = []
@@ -138,12 +140,20 @@ def calculate():
 
     ridge = genRidge(grid)
     holes = findHoles(grid)
+    sat = findLineSaturation(grid)
+
+    searchQueue = [tetrisSim.currentPiece]
+    for i in range(searchDepth-1):
+        searchQueue.append(queue[i])
 
     # Position block
-    # inputs = chainMove({'queue' : [tetrisSim.currentPiece, queue[0]], 'hold' : tetrisSim.hold}, 
-    #       {'contents' : grid, 'ridge' : ridge, 'holes' : holes})
-    inputs = chainMove({'queue' : [tetrisSim.currentPiece], 'hold' : tetrisSim.hold}, 
-            {'contents' : grid, 'ridge' : ridge, 'holes' : holes})
+    
+    start = time.time() # Speedtests
+    
+    inputs = chainMove({'queue' : searchQueue, 'hold' : tetrisSim.hold}, 
+          {'contents' : grid, 'ridge' : ridge, 'holes' : holes, 'saturation' : sat, 'iScore' : 0})
+        
+    print(time.time() - start)
 
     if inputs.piece != tetrisSim.currentPiece: # Means it was swapped for a hold
         log("Current piece before hold: " + str(tetrisSim.currentPiece))
@@ -246,6 +256,7 @@ def chainMove(inHand, board):
 
     if len(hand['queue']) > 0:
         maxScore = -100000
+        maxIScore = -100000
         bestSpot = 0
         bestRot = 0
         bestBoard = None
@@ -259,7 +270,8 @@ def chainMove(inHand, board):
                 hypoGrid = result['board']
                 ridge = result['ridge']
                 holes = board['holes'] + result['hole delta']
-                nextBoard = {'contents' : hypoGrid, 'ridge' : ridge, 'holes' : holes}
+                nextBoard = {'contents' : hypoGrid, 'ridge' : ridge, 'holes' : holes, 'saturation' : result['saturation']
+                            , 'iScore' : result['iScore']}
 
                 # Create alternate queue that has a hold swap
                 newHold = hand['queue'][0]
@@ -277,8 +289,16 @@ def chainMove(inHand, board):
 
 
                 # Boilerplate lifted from elsewhere
-                if (nhOutcome.score > maxScore or ohOutcome.score > maxScore):
-                    maxScore = max(maxScore, nhOutcome.score, ohOutcome.score)
+                if nhOutcome.score + nhOutcome.iScore > maxScore + maxIScore:
+                    maxScore = max(maxScore, nhOutcome.score)
+                    maxIScore = max(maxIScore, nhOutcome.iScore)
+                    bestSpot = x
+                    bestRot = r
+                    bestBoard = nextBoard
+                    blc = result
+                if ohOutcome.score + ohOutcome.iScore > maxScore + maxIScore:
+                    maxScore = max(maxScore, ohOutcome.score)
+                    maxIScore = max(maxIScore, ohOutcome.iScore)
                     bestSpot = x
                     bestRot = r
                     bestBoard = nextBoard
@@ -291,7 +311,7 @@ def chainMove(inHand, board):
         if blc is not None:
             lineClears = blc['clears']
                 
-        return MoveInput(delta, bestRot, bestBoard, maxScore, lineClears, nextMove) 
+        return MoveInput(delta, bestRot, bestBoard, maxScore, maxIScore, lineClears, nextMove) 
         # Report that the move popped for this layer has this score
 
     else:
@@ -300,15 +320,15 @@ def chainMove(inHand, board):
         s1 = positionPiece(nextMove, board)
         s2 = positionPiece(hand['hold'], board)
 
-        if  s1.score > s2.score:
+        if  s1.score + s1.iScore > s2.score + s2.iScore:
             return s1
         return s2
 
 def positionPiece(piece, board):
-    start = time.time()
 
     # Try it in every location for validity
     maxScore = -100000
+    maxIScore = -100000
     bestSpot = 0
     bestRot = 0
     bestBoard = None
@@ -328,14 +348,15 @@ def positionPiece(piece, board):
             holes = results['hole delta'] + board['holes']
 
             score = 0
-            score += testPeaks(ridge) * 1
+            score += testPeaks(ridge) * 0.5
             score += testHoles(holes) * -10
             score += testPits(ridge)
-            score += stackBuilder(results['clears']) * 10
+            
             score += tetrisFinder(results['clears']) * 40
 
-            if score > maxScore:
+            if score + results['iScore'] > maxScore + maxIScore:
                 maxScore = score
+                maxIScore = results['iScore']
                 bestSpot = x
                 bestRot = r
                 bestBoard = {'contents' : hypoBoard, 'ridge' : ridge}
@@ -352,14 +373,14 @@ def positionPiece(piece, board):
         lineClears = blc['clears']
     
     
-    print(time.time() - start)
 
-    return MoveInput(delta, bestRot, bestBoard, maxScore, lineClears, piece)
+    return MoveInput(delta, bestRot, bestBoard, maxScore, maxIScore, lineClears, piece)
 
 def genHypoBoard(board, piece, x, r):
     rotGrid = tetrisSim.rotVars[piece][r]
     bGrid = board['contents']
     ridge = board['ridge']
+    sat = board['saturation']
 
     # Find lowest valid position
     # Estimate top of ridge
@@ -387,12 +408,14 @@ def genHypoBoard(board, piece, x, r):
     # Create hypothetical board
     # Needed for future reading
     hypoBoard = np.copy(bGrid)
+    newSat = np.copy(sat)
     for lx in range(rotGrid.shape[0]):
         for ly in range(rotGrid.shape[1]):
             if (rotGrid[lx, ly] > 0):
                 hypoBoard[x+lx, y+ly] = rotGrid[lx, ly]
+                newSat[y+ly] += 1
 
-    lc = tetrisSim.lineClear(hypoBoard)
+    lc = tetrisSim.lineClear(hypoBoard, newSat) # TODO: This is causing a 10 ms slowdown
 
 
     # Counting holes
@@ -437,6 +460,11 @@ def genHypoBoard(board, piece, x, r):
 
     lc['ridge'] = newRidge
     lc['hole delta'] = holeDelta
+    lc['saturation'] = newSat
+
+    iScore = board['iScore']
+    iScore += stackBuilder(lc['clears']) * 7
+    lc['iScore'] = iScore
 
     return lc
 
@@ -455,10 +483,6 @@ def testPeaks(ridge):
     peak = max(ridge)
     return -peak
 
-# Doesn't do anything ig
-def testHoles(holes):
-    return holes
-
 def findHoles(grid):
     holes = 0
     for col in grid:
@@ -476,6 +500,21 @@ def findHoles(grid):
     o = -holes
 
     return o
+
+def findLineSaturation(grid):
+    o = []
+    for y in range(grid.shape[1]):
+        i = 0
+        for x in range(grid.shape[0]):
+            if grid[x, y] > 0:
+                i += 1
+        o.append(i)
+    
+    return o
+
+# Doesn't do anything ig
+def testHoles(holes):
+    return holes
 
 def testPits(ridge):
     o = 0
