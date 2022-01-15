@@ -3,6 +3,7 @@ import win32con
 import win32api
 import numpy as np
 from PIL import ImageGrab
+import collections
 
 import keyboard
 
@@ -14,6 +15,7 @@ topMargin = 3
 latency = 0.1 
 hardDropLatency = 0.4 # Queue needs time to update, for example
 lineclearLatency = 1
+holdLatency = 0.2
 ARD = 0.17
 ARS = 0.05
 ARC = 0.1 # compensation
@@ -51,6 +53,7 @@ baseRot =  {'I' : [[0, 1, 0, 0],
         }
 spawnOffset = {'I' : -1, 'J' : -1, 'L' : -1, 'O' : 0, 'S' : -1, 'T' : -1, 'Z' : -1}
 
+MoveInput = collections.namedtuple('MoveInput', 'delta rot board score lineclears piece')
 
 def main():
     global currentPiece, currentBoard, hold
@@ -62,6 +65,11 @@ def main():
         global started
         if keyboard.is_pressed('`'):
             started = True
+
+        # Screengrab for positioning
+        if keyboard.is_pressed('1'):
+            img = pollScreen() 
+            img.show()
 
         if not started:
             continue
@@ -106,22 +114,27 @@ def main():
             continue
 
         # Position block
-        # inputsMain = chainMove({'queue' : [currentPiece], 'hold' : hold}, grid)
-        # inputsAlt = chainMove({'queue' : [hold], 'hold' : currentPiece}, grid)
-        inputs = chainMove({'queue' : [currentPiece, queue[0]], 'hold' : hold}, grid)
+        # inputs = chainMove({'queue' : [currentPiece, queue[0]], 'hold' : hold}, grid)
+        inputs = chainMove({'queue' : [currentPiece], 'hold' : hold}, grid)
 
-        if inputs['piece'] != currentPiece: # Means it was swapped for a hold
+        if inputs.piece != currentPiece: # Means it was swapped for a hold
+            print("Current piece before hold: " + currentPiece)
+            print("Held piece before hold: " + hold)
             holdPiece(currentPiece)
-            # inputs = inputsAlt
+            print()
+        
+        # Print queue
+        for i in range(3):
+            print('Element ' + str(i) + ' of queue is ' + queue[i])
 
-        move(inputs['delta'], inputs['rot'])
+        move(inputs.delta, inputs.rot)
         hardDrop()
 
-        if inputs['lineclears'] > 0:
+        if inputs.lineclears > 0:
             time.sleep(lineclearLatency)
 
         currentPiece = queue.pop(0)
-        currentBoard = inputs['board']
+        currentBoard = inputs.board
 
         report(inputs)
         
@@ -212,11 +225,13 @@ def hardDrop():
     return
 
 def holdPiece(piece):
-    global hold
+    global hold, currentPiece
     o = hold
     hold = piece
+    currentPiece = o
 
     ping('c')
+    time.sleep(holdLatency)
     return o
 
 def move(delta, rot):
@@ -263,34 +278,10 @@ def chainMove(inHand, board):
 
 
         for x in range(-2, board.shape[0]):
-
-            # Rotations as well
             for r in range(4):
-                rotGrid = np.rot90(pGrid, r, axes=(1, 0))
-                # printGrid(rotGrid)
-
-                # Find lowest valid position
-                y = board.shape[1] - rotGrid.shape[1] # Starts from the top
-                conflict = hasConflict(rotGrid, (x, y), board)
-
-                # Abort if current spot is taken 
-                if (conflict):
+                lc = genHypoBoard(board, pGrid, x, r)
+                if lc is None:
                     continue
-
-                while not conflict:
-                    conflict = hasConflict(rotGrid, (x, y-1), board)
-
-                    if not conflict:
-                        y -= 1
-
-                # Create hypothetical board
-                hypoBoard = np.copy(board)
-                for lx in range(rotGrid.shape[0]):
-                    for ly in range(rotGrid.shape[1]):
-                        if (rotGrid[lx, ly] > 0):
-                            hypoBoard[x+lx, y+ly] = rotGrid[lx, ly]
-
-                lc = lineClear(hypoBoard)
                 hypoBoard = lc['board']
 
                 # Create alternate queue that has a hold swap
@@ -305,15 +296,15 @@ def chainMove(inHand, board):
 
                 # Now that the board state is resolved, bind score outcome to child score outcome
                 nhOutcome = chainMove(newHand, hypoBoard)
-                nhOutcome['piece'] = newHand['queue'][0] # Update active piece so the receiver knows which choice led to here
+                nhOutcome.piece = newHand['queue'][0] # Update active piece so the receiver knows which choice led to here
 
                 ohOutcome = chainMove(hand, hypoBoard)
-                ohOutcome['piece'] = hand['queue'][0]
+                ohOutcome.piece = hand['queue'][0]
 
 
                 # Boilerplate lifted from elsewhere
-                if (nhOutcome['score'] > maxScore or ohOutcome['score'] > maxScore):
-                    maxScore = max(maxScore, nhOutcome['score'], ohOutcome['score'])
+                if (nhOutcome.score > maxScore or ohOutcome.score > maxScore):
+                    maxScore = max(maxScore, nhOutcome.score, ohOutcome.score)
                     bestSpot = x
                     bestRot = r
                     bestBoard = hypoBoard
@@ -326,13 +317,13 @@ def chainMove(inHand, board):
         if blc is not None:
             lineClears = blc['clears']
                 
-        return {'delta' : delta, 'rot' : bestRot, 'board' : bestBoard, 'score' : maxScore, 'lineclears' : lineClears, 'piece' : nextMove}
+        return MoveInput(delta, bestRot, bestBoard, maxScore, lineClears, nextMove)
     else:
         # Means that we are at end of the queue, just score like normal
         # Just scoring, not actually updating the hold
         s1 = positionPiece(nextMove, board)
         s2 = positionPiece(hand['hold'], board)
-        if  s1['score'] > s2['score']:
+        if  s1.score > s2.score:
             return s1
         return s2
 
@@ -350,40 +341,10 @@ def positionPiece(piece, board):
 
         # Rotations as well
         for r in range(4):
-            rotGrid = np.rot90(pGrid, r, axes=(1, 0))
-            # printGrid(rotGrid)
-
-            # Find lowest valid position
-            y = board.shape[1] - rotGrid.shape[1] # Starts from the top
-            conflict = hasConflict(rotGrid, (x, y), board)
-
-            # Abort if current spot is taken 
-            if (conflict):
-                # print('Conflict')
-                # print('X at conflict: ' + str(x))
-                # print('Y at conflict: ' + str(y))
+            lc = genHypoBoard(board, pGrid, x, r)
+            if lc is None:
                 continue
-
-            while not conflict:
-                conflict = hasConflict(rotGrid, (x, y-1), board)
-
-                if not conflict:
-                    y -= 1
-
-            # Create hypothetical board
-            hypoBoard = np.copy(board)
-            for lx in range(rotGrid.shape[0]):
-                for ly in range(rotGrid.shape[1]):
-                    if (rotGrid[lx, ly] > 0):
-                        hypoBoard[x+lx, y+ly] = rotGrid[lx, ly]
-
-            lc = lineClear(hypoBoard)
             hypoBoard = lc['board']
-            
-            #printGrid(hypoBoard)
-            #if (piece == 'I' and (r == 1 or r == 3)):
-            #    print("Vertical I piece!")
-            #    time.sleep(1000)
 
             # Generate ridge
             ridge = genRidge(hypoBoard)
@@ -392,7 +353,7 @@ def positionPiece(piece, board):
             score += testPeaks(hypoBoard, ridge)
             score += testHoles(hypoBoard) * 5
             score += testPits(hypoBoard, ridge)
-            score += stackBuilder(lc['clears']) * 5
+            score += stackBuilder(lc['clears']) * 10
             score += tetrisFinder(lc['clears']) * 40
 
             if score > maxScore:
@@ -409,7 +370,36 @@ def positionPiece(piece, board):
     lineClears = 0
     if blc is not None:
         lineClears = blc['clears']
-    return {'delta' : delta, 'rot' : bestRot, 'board' : bestBoard, 'score' : maxScore, 'lineclears' : lineClears, 'piece' : piece}
+
+    return MoveInput(delta, bestRot, bestBoard, maxScore, lineClears, piece)
+
+def genHypoBoard(board, pGrid, x, r):
+    rotGrid = np.rot90(pGrid, r, axes=(1, 0))
+    # printGrid(rotGrid)
+
+    # Find lowest valid position
+    y = board.shape[1] - rotGrid.shape[1] # Starts from the top
+    conflict = hasConflict(rotGrid, (x, y), board)
+
+    # Abort if current spot is taken 
+    if (conflict):
+        return None
+
+    while not conflict:
+        conflict = hasConflict(rotGrid, (x, y-1), board)
+
+        if not conflict:
+            y -= 1
+
+    # Create hypothetical board
+    hypoBoard = np.copy(board)
+    for lx in range(rotGrid.shape[0]):
+        for ly in range(rotGrid.shape[1]):
+            if (rotGrid[lx, ly] > 0):
+                hypoBoard[x+lx, y+ly] = rotGrid[lx, ly]
+
+    lc = lineClear(hypoBoard)
+    return lc
 
 def hasConflict(grid, pos, space):
     for x in range(grid.shape[0]):
@@ -446,10 +436,6 @@ def lineClear(grid):
             # put line into post clear grid
             for x in range(grid.shape[0]):
                 postClear[x, y - linesCleared] = grid[x, y]
-
-    #if (linesCleared > 0):
-        #print("Lines cleared: " + str(linesCleared))
-         #printGrid(postClear)
 
     return {'board' : postClear, 'clears' : linesCleared}
 
@@ -508,11 +494,11 @@ def tetrisFinder(lineClears):
     return 0
 
 def report(data):
-    print('delta: '+str(data['delta']))
-    print('rot: '+str(data['rot']))
-    printGrid(data['board'])
-    print('Piece: '+data['piece'])
+    print('delta: '+str(data.delta))
+    print('rot: '+str(data.rot))
+    printGrid(data.board)
     print('^ Board should be')
+    print('Piece: '+data.piece)
     print("Hold is: " +  hold)
     print('_'*20)
 
