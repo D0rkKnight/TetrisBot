@@ -2,7 +2,9 @@
 
 #include <Python.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <structmember.h>
+#include "tetrisCore.h"
 
 int main() {
     printf("This main method does nothing but fulfill an stdio requirement.");
@@ -128,6 +130,7 @@ Board_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         self->w = w;
         self->h = h;
     }
+
     return (PyObject *) self;
 }
 
@@ -147,13 +150,6 @@ static PyMemberDef Board_members[] = {
      "height"},
     {NULL}
 };
-
-static PyObject *
-Board_getHeight(BoardObject *self, PyObject *Py_UNUSED(ignored))
-{
-    PyObject *hObj = PyLong_FromLong(self->h);
-    return hObj;
-}
 
 static PyObject *
 Board_asString(BoardObject *self, PyObject *Py_UNUSED(ignored))
@@ -185,12 +181,74 @@ Board_asString(BoardObject *self, PyObject *Py_UNUSED(ignored))
     return PyUnicode_FromString(out);
 }
 
+bool inBounds(BoardObject *board, int x, int y) {
+    if (x < 0 || x >= board->w || y < 0 || y >= board->h) {
+        printf("Index out of bounds: %d, %d\n", x, y);
+        return false;
+    }
+
+    return true;
+}
+int getBit(BoardObject *board, int x, int y) {
+    // TODO: Make this compiler optional in case it's slowing things down
+    if (!inBounds(board, x, y)) 
+        return -1;
+
+    return board->grid[y][x];
+}
+void setBit(BoardObject *board, int v, int x, int y) {
+    if (!inBounds(board, x, y))
+        return;
+    
+    board->grid[y][x] = v;
+    return;
+}
+
+static PyObject *
+Board_get(BoardObject *self, PyObject *args) {
+    int x, y;
+    
+    if (!PyArg_ParseTuple(args, "ii", &x, &y))
+        return NULL;
+
+    int o = getBit(self, x, y);
+    return PyLong_FromLong(o);
+}
+
+static PyObject *
+Board_set(BoardObject *self, PyObject *args) {
+    int x, y, v;
+    
+    if (!PyArg_ParseTuple(args, "iii", &v, &x, &y))
+        return NULL;
+
+    setBit(self, v, x, y);
+    Py_RETURN_NONE;
+}
+
+// Perform a deep copy of the board
+PyObject *
+Board_copy(BoardObject *self, PyObject *Py_UNUSED(ignored)) {
+    BoardObject *cp;
+    cp = (BoardObject *) PyObject_CallObject((PyObject *) &BoardType, NULL);
+
+    for (int r=0; r<self->h; r++) {
+        // Copy row
+        memcpy(cp->grid[r], self->grid[r], self->w*sizeof(int));
+    }
+
+    return (PyObject *) cp;
+}
+
 static PyMethodDef Board_methods[] = {
-    {"getHeight", (PyCFunction) Board_getHeight, METH_NOARGS,
-     "Returns height"
+    {"get", (PyCFunction) Board_get, METH_VARARGS,
+     "Retrieve the element at a specified position"
     },
-    {"asString", (PyCFunction) Board_asString, METH_NOARGS,
-     "Returns string that can be printed to represent the board"
+    {"set", (PyCFunction) Board_set, METH_VARARGS,
+     "Set the element at a specified position to a specific value"
+    },
+    {"copy", (PyCFunction) Board_copy, METH_NOARGS,
+     "Performs a deep copy of the board"
     },
     {NULL}
 };
@@ -206,7 +264,8 @@ static PyTypeObject BoardType = {
     .tp_init = (initproc) Board_init,
     .tp_dealloc = (destructor) Board_dealloc,
     .tp_members = Board_members,
-    .tp_methods = Board_methods
+    .tp_methods = Board_methods,
+    .tp_str = Board_asString
 };
 
 static PyMethodDef coreMethods[] = {
