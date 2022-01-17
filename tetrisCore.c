@@ -5,9 +5,88 @@
 #include <structmember.h>
 
 int main() {
-    printf("Hello World!");
+    printf("This main method does nothing but fulfill an stdio requirement.");
 }
 
+// PIECE GENERATION ---------------------------
+int *pieceData[7];
+enum piece{I, J, L, O, S, T, Z};
+int pieceDims[7] = {4, 3, 3, 2, 3, 3, 3};
+
+static void installPiece(int p, int *data) {
+    int dim = pieceDims[p];
+    int len = dim * dim;
+    int *mem = malloc(len*sizeof(int));
+
+    printf("len: %d\n", len);
+
+    for (int i=0; i<len; i++) {
+        mem[i] = data[i];
+    }
+
+    pieceData[p] = mem;
+
+    return;
+}
+
+PyObject *
+tetrisCore_init(PyObject *self, PyObject *args) {
+    // Initialize pieces (1st quadrant, x-y indexing)
+    int i[] = {0, 0, 1, 0,
+                 0, 0, 1, 0,
+                 0, 0, 1, 0,
+                 0, 0, 1, 0};
+    int j[] = {0, 1, 1,
+                   0, 1, 0,
+                   0, 1, 0};
+    int l[] = {0, 1, 0,
+                   0, 1, 0,
+                   0, 1, 1};
+    int o[] = {1, 1,
+                   1, 1};
+    int s[] = {0, 1, 0,
+                   0, 1, 1,
+                   0, 0, 1};
+    int t[] = {0, 1, 0,
+                   0, 1, 1,
+                   0, 1, 0};
+    int z[] = {0, 0, 1,
+                   0, 1, 1,
+                   0, 1, 0};
+    
+    int *tp[7] = {i, j, l, o, s, t, z};
+    for (int a=0; a<7; a++) {
+        installPiece(a, tp[a]);
+    }
+
+    // Do rotate variants in the future
+
+    Py_RETURN_NONE;
+}
+
+PyObject *
+tetrisCore_getPieceBit(PyObject *self, PyObject *args) {
+    int p;
+    int x;
+    int y;
+
+    if (!PyArg_ParseTuple(args, "iii", &p, &x, &y))
+        return NULL;
+
+    return PyLong_FromLong(pieceData[p][x * pieceDims[p] + y]);
+}
+
+PyObject *
+tetrisCore_getPieceDim(PyObject *self, PyObject *args) {
+    int p;
+
+    if (!PyArg_ParseTuple(args, "i", &p))
+        return NULL;
+
+    return PyLong_FromLong(pieceDims[p]);
+}
+
+// BOARD --------------------------------------
 typedef struct {
     PyObject_HEAD
     int ** grid;
@@ -130,29 +209,10 @@ static PyTypeObject BoardType = {
     .tp_methods = Board_methods
 };
 
-static PyObject *
-tetrisCore_printBoard(PyObject *self, PyObject *args) {
-    PyObject *gridO = malloc(sizeof(PyObject));
-    int **grid;
-
-    if (!PyArg_ParseTuple(args, "O", gridO))
-        return NULL;
-
-    printf("PyObject");
-
-    printf("stuff: %d\n", gridO);
-
-    grid = (int **) PyCapsule_GetPointer(gridO, "grid_pointer");
-
-    //printf("Grid discovered with first elelemnt %d\n", grid[0][0]);
-
-    Py_RETURN_NONE;
-}
-
-// C compiles linearly.
-
 static PyMethodDef coreMethods[] = {
-    {"printBoard", tetrisCore_printBoard, METH_VARARGS, "Prints a c type tetris board to console"},
+    {"init", tetrisCore_init, METH_VARARGS, "Initializes the Tetris Core."},
+    {"getPieceBit", tetrisCore_getPieceBit, METH_VARARGS, "Retrieves a cell from a tetromino."},
+    {"getPieceDim", tetrisCore_getPieceDim, METH_VARARGS, "Retrieves dimensions for a tetromino."},
     {NULL, NULL, 0, NULL}
 };
 
