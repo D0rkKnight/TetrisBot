@@ -1,5 +1,6 @@
 {
     "files.associations": {
-        "python.h": "c"
+        "python.h": "c",
+        "structmember.h": "c"
     }
 }
