@@ -153,28 +153,45 @@ def calculate():
     
     start = time.time() # Speedtests
     
-    inputs = chainMove({'queue' : searchQueue, 'hold' : tetrisSim.hold}, 
-          {'contents' : grid, 'ridge' : ridge, 'holes' : holes, 'saturation' : sat, 'iScore' : 0})
+    # inputs = chainMove({'queue' : searchQueue, 'hold' : tetrisSim.hold}, 
+    #       {'contents' : grid, 'ridge' : ridge, 'holes' : holes, 'saturation' : sat, 'iScore' : 0})
         
-    print(time.time() - start)
+    # print(time.time() - start)
 
-    if inputs.piece != tetrisSim.currentPiece: # Means it was swapped for a hold
-        log("Current piece before hold: " + str(tetrisSim.currentPiece))
-        log("Held piece before hold: " + str(tetrisSim.hold))
-        holdPiece()
-        log("")
+    # if inputs.piece != tetrisSim.currentPiece: # Means it was swapped for a hold
+    #     log("Current piece before hold: " + str(tetrisSim.currentPiece))
+    #     log("Held piece before hold: " + str(tetrisSim.hold))
+    #     holdPiece()
+    #     log("")
     
     # Print queue
     for i in range(len(queue)):
         log('Element ' + str(i) + ' of queue is ' + str(queue[i]))
 
-    move(inputs.delta, inputs.rot)
+    # Simple C algo override
+    # Write ridge into board internal ridge
+    for i in range(grid.w):
+        grid.setRidge(ridge[i]+1, i)
+    
+    #print("\n\n\n current piece: "+str(tetrisSim.currentPiece))
+
+    piece = searchQueue[0]
+    xDest = grid.positionPiece(piece)
+
+    # Calculate necessary shift
+    spawnPos = tetrisSim.genPieceSpawn(piece)
+    delta = xDest - spawnPos[0]
+
+    #move(inputs.delta, inputs.rot)
+    move(delta, 0)
     hardDrop()
 
-    if inputs.lineclears > 0:
-        wait(lineclearLatency)
+    time.sleep(0.2)
 
-    report(inputs)
+    # if inputs.lineclears > 0:
+    #     wait(lineclearLatency)
+
+    # report(inputs)
 
 def hardDrop():
     if source == SCREEN_CAPTURE:

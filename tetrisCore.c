@@ -12,6 +12,8 @@ int main() {
 
 // PIECE GENERATION ---------------------------
 int *pieceData[7];
+int *pieceMarginData[7];
+int *pieceFillData[7];
 enum piece{I, J, L, O, S, T, Z};
 int pieceDims[7] = {4, 3, 3, 2, 3, 3, 3};
 
@@ -27,6 +29,38 @@ static void installPiece(int p, int *data) {
     pieceData[p] = mem;
 
     return;
+}
+
+static void calcPieceMargins(int p, int *data) {
+    int dim = pieceDims[p];
+    int *bMem = PyMem_Malloc(dim*sizeof(int));
+    int *tMem = PyMem_Malloc(dim*sizeof(int));
+    
+    for (int x=0; x<dim; x++) {
+        // March upwards until a cell is discovered
+        int bottomDetected = 0;
+        int bottom = -1;
+        int lastCell = 0;
+        for (int y = 0; y < dim; y++) {
+            if (data[x * dim + y] > 0) {
+                if (!bottomDetected)
+                    bottom = y;
+                bottomDetected = 1;
+
+                lastCell = y;
+            }
+        }
+
+        bMem[x] = bottom;
+        tMem[x] = lastCell+1;
+
+        printf("%d", lastCell+1);
+    }
+
+    printf("\n");
+
+    pieceMarginData[p] = bMem;
+    pieceFillData[p] = tMem;
 }
 
 PyObject *
@@ -57,6 +91,7 @@ tetrisCore_init(PyObject *self, PyObject *args) {
     int *tp[7] = {i, j, l, o, s, t, z};
     for (int a=0; a<7; a++) {
         installPiece(a, tp[a]);
+        calcPieceMargins(a, tp[a]);
     }
 
     // Do rotate variants in the future
@@ -87,15 +122,6 @@ tetrisCore_getPieceDim(PyObject *self, PyObject *args) {
 }
 
 // BOARD --------------------------------------
-typedef struct {
-    PyObject_HEAD
-    int ** grid;
-    int w;
-    int h;
-    int * ridge;
-    int * sat;
-} BoardObject;
-
 static void
 Board_dealloc(BoardObject *self) 
 {
@@ -154,10 +180,8 @@ static PyMemberDef Board_members[] = {
     {NULL}
 };
 
-static PyObject *
-Board_asString(BoardObject *self, PyObject *Py_UNUSED(ignored))
-{   
-
+static char *
+boardToString(BoardObject *self) {
     int cells = self->w * self->h;
     int chars = cells + self->h + 1; // Cells + newlines + null term
     char *out = PyMem_Malloc(sizeof(char) * chars);
@@ -166,11 +190,7 @@ Board_asString(BoardObject *self, PyObject *Py_UNUSED(ignored))
         int *row = self->grid[self->h - r - 1];
         int rowOffset = r * (self->w + 1);
 
-        //printf("row start \n");
-
         for (int c = 0; c < self->w; c++) {
-            //printf("first element: %d\n", *row);
-
             // Pull character
             int val = row[c]; // Build from top
 
@@ -183,29 +203,36 @@ Board_asString(BoardObject *self, PyObject *Py_UNUSED(ignored))
                 oc = 'O';
 
             out[i] = oc;
-
-            //printf("index: %d, size: %d\n", i, chars);
         }
-        //printf("row end \n");
 
         out[rowOffset + self->w] = '\n';
-
-        //printf("newline: %d\n", rowOffset+self->w);
     }
 
     out[chars-1] = '\0'; // Terminate string
-    //printf("cap: %d\n", chars-1);
-    
-    return PyUnicode_FromString(out);
+
+    return out;
 }
 
-static bool inBounds(BoardObject *board, int x, int y) {
+static void
+printBoard(BoardObject *b) {
+    char *str = boardToString(b);
+    printf(str);
+    PyMem_Free(str);
+}
+
+static PyObject *
+Board_asString(BoardObject *self, PyObject *Py_UNUSED(ignored))
+{   
+    return PyUnicode_FromString(boardToString(self));
+}
+
+static int inBounds(BoardObject *board, int x, int y) {
     if (x < 0 || x >= board->w || y < 0 || y >= board->h) {
         printf("Index out of bounds: %d, %d\n", x, y);
-        return false;
+        return 0;
     }
 
-    return true;
+    return 1;
 }
 
 static int getBit(BoardObject *board, int x, int y) {
@@ -222,6 +249,11 @@ static void setBit(BoardObject *board, int v, int x, int y) {
     if (!inBounds(board, x, y))
         return;
     
+    board->grid[y][x] = v;
+    return;
+}
+
+static void setBitUnchecked(BoardObject *board, int v, int x, int y) {
     board->grid[y][x] = v;
     return;
 }
@@ -304,7 +336,7 @@ Board_setSat(BoardObject *self, PyObject *args) {
 }
 
 // Perform a deep copy of the board
-PyObject *
+static PyObject *
 Board_copy(BoardObject *self, PyObject *Py_UNUSED(ignored)) {
     BoardObject *cp;
     cp = (BoardObject *) PyObject_CallObject((PyObject *) &BoardType, NULL);
@@ -321,6 +353,123 @@ Board_copy(BoardObject *self, PyObject *Py_UNUSED(ignored)) {
 
     return (PyObject *) cp;
 }
+
+
+
+static BoardObject* genHypoBoard(int p, int x, BoardObject *b) {
+    int pDims = pieceDims[p];
+    int *pData = pieceData[p];
+    
+    // Perform the ridge march
+    int y=-2;
+    int conflict = 0;
+
+    for(int i=0; i<pDims; i++) {
+        int col = x+i;
+        int bMargin = pieceMarginData[p][i];
+        if (bMargin < 0) continue;
+
+        if (col < 0 || col >= b->w) {
+            conflict = 1;
+            break;
+        }
+
+        int rTop = b->ridge[col] - bMargin; // todo: generate the ridge, note that it is shifted off by one
+        if (rTop > y) y = rTop;
+    }
+
+    if (conflict || y > b->h - pDims) return NULL;
+
+    // Create a hypothetical board
+    BoardObject *hb = (BoardObject *) Board_copy(b, NULL);
+    for (int lx=0; lx<pDims; lx++) {
+        for (int ly=0; ly<pDims; ly++) {
+            int cell = pData[lx*pDims + ly];
+
+            if (cell > 0) {
+                setBitUnchecked(hb, cell, x+lx, y+ly); // Unchecked for sp e e d.
+            }
+        }
+    }
+
+    int holesMade = 0;
+    int holesRemoved = 0;
+
+    // Update hypo board ridge
+    for(int i=0; i<pDims; i++) {
+        int rDelta = pieceFillData[p][i];
+        if (rDelta < 0) continue;
+
+        int col = x + i;
+
+        // Calculate holes (unused rn)
+        int margin = pieceMarginData[p][i];
+        int holesMade = y - hb->ridge[col] + margin;
+
+        // Update ridge altitude
+        hb->ridge[col] = y + rDelta;
+    }
+
+    // Todo: read line clears for hole resolution
+    
+    return hb;
+}
+
+static int testPeaks(BoardObject *b) {
+    int *r = b->ridge;
+    int maxAlt = 0;
+    for (int i=0; i<b->w; i++) {
+        if (r[i] > maxAlt) maxAlt = r[i];
+    }
+
+    return maxAlt;
+}
+
+static PyObject *
+Board_positionPiece(BoardObject *self, PyObject *args) {
+    int p;
+
+    if (!PyArg_ParseTuple(args, "i", &p))
+        return NULL;
+
+    int maxScore = -100000;
+    int bestX = 0;
+    BoardObject *bestBoard = NULL;
+    // Iterate through available pieces
+    for (int x=-2; x<self->w; x++) {
+        // Only horizontal shifts for now
+
+        // Pull score
+        BoardObject *results = genHypoBoard(p, x, self);
+        if (results == NULL) continue;
+        
+        int score = 0;
+        score += testPeaks(results) * -1;
+
+        if (score > maxScore) {
+            maxScore = score;
+            bestX = x;
+            bestBoard = results;
+        }
+
+        printf("pos: %d, score: %d\n", x, score);
+    }
+
+    if (bestBoard != NULL) {
+        printf("base ridge: \n");
+        for(int i=0; i<self->w; i++) printf("%d ", self->ridge[i]);
+        printf("\n x: %d, piece no.: %d\n", bestX, p);
+        printBoard(self);
+        printf("new ridge: \n");
+        for(int i=0; i<self->w; i++) printf("%d ", bestBoard->ridge[i]);
+        printf("\n");
+        printBoard(bestBoard);
+    }
+
+    return PyLong_FromLong(bestX);
+}
+
+
 
 static PyMethodDef Board_methods[] = {
     {"get", (PyCFunction) Board_get, METH_VARARGS,
@@ -339,6 +488,8 @@ static PyMethodDef Board_methods[] = {
     {"getSat", (PyCFunction) Board_getSat, METH_VARARGS, ""
     },
     {"setSat", (PyCFunction) Board_setSat, METH_VARARGS, ""
+    },
+    {"positionPiece", (PyCFunction) Board_positionPiece, METH_VARARGS, ""
     },
     {NULL}
 };
