@@ -11,27 +11,47 @@ int main() {
 }
 
 // PIECE GENERATION ---------------------------
-int *pieceData[7];
-int *pieceMarginData[7];
-int *pieceFillData[7];
+int *pieceData[7][4];
+int *pieceMarginData[7][4];
+int *pieceFillData[7][4];
 enum piece{I, J, L, O, S, T, Z};
 int pieceDims[7] = {4, 3, 3, 2, 3, 3, 3};
 
-static void installPiece(int p, int *data) {
+static void installPiece(int p, int r, int *data) {
     int dim = pieceDims[p];
     int len = dim * dim;
     int *mem = PyMem_Malloc(len*sizeof(int));
 
     for (int i=0; i<len; i++) {
-        mem[i] = data[i];
+        int x = i/dim;
+        int y = i%dim;
+        for (int i=0; i<r; i++) {
+            // Spin
+            int t = x;
+            x = y;
+            y = -t;
+        }
+
+        // Reposition
+        if (r%4==2 || r%4==3) x += dim-1;
+        if (r%4==1 || r%4==2) y += dim-1;
+
+        // This should work?
+        mem[x*dim+y] = data[i];
     }
 
-    pieceData[p] = mem;
+    for (int i=0; i<len; i++) {
+        printf("%d", mem[i]);
+    } 
+
+    printf("\n");
+
+    pieceData[p][r] = mem;
 
     return;
 }
 
-static void calcPieceMargins(int p, int *data) {
+static void calcPieceMargins(int p, int r, int *data) {
     int dim = pieceDims[p];
     int *bMem = PyMem_Malloc(dim*sizeof(int));
     int *tMem = PyMem_Malloc(dim*sizeof(int));
@@ -54,13 +74,13 @@ static void calcPieceMargins(int p, int *data) {
         bMem[x] = bottom;
         tMem[x] = lastCell+1;
 
-        printf("%d", lastCell+1);
+        //printf("%d", lastCell+1);
     }
 
-    printf("\n");
+    //printf("\n");
 
-    pieceMarginData[p] = bMem;
-    pieceFillData[p] = tMem;
+    pieceMarginData[p][r] = bMem;
+    pieceFillData[p][r] = tMem;
 }
 
 PyObject *
@@ -90,8 +110,10 @@ tetrisCore_init(PyObject *self, PyObject *args) {
     
     int *tp[7] = {i, j, l, o, s, t, z};
     for (int a=0; a<7; a++) {
-        installPiece(a, tp[a]);
-        calcPieceMargins(a, tp[a]);
+        for (int r=0; r<4; r++) {
+            installPiece(a, r, tp[a]);
+            calcPieceMargins(a, r, pieceData[a][r]);
+        }
     }
 
     // Do rotate variants in the future
@@ -108,7 +130,7 @@ tetrisCore_getPieceBit(PyObject *self, PyObject *args) {
     if (!PyArg_ParseTuple(args, "iii", &p, &x, &y))
         return NULL;
 
-    return PyLong_FromLong(pieceData[p][x * pieceDims[p] + y]);
+    return PyLong_FromLong(pieceData[p][0][x * pieceDims[p] + y]);
 }
 
 PyObject *
@@ -358,7 +380,7 @@ Board_copy(BoardObject *self, PyObject *Py_UNUSED(ignored)) {
 
 static BoardObject* genHypoBoard(int p, int x, BoardObject *b) {
     int pDims = pieceDims[p];
-    int *pData = pieceData[p];
+    int *pData = pieceData[p][0];
     
     // Perform the ridge march
     int y=-2;
@@ -366,7 +388,7 @@ static BoardObject* genHypoBoard(int p, int x, BoardObject *b) {
 
     for(int i=0; i<pDims; i++) {
         int col = x+i;
-        int bMargin = pieceMarginData[p][i];
+        int bMargin = pieceMarginData[p][0][i];
         if (bMargin < 0) continue;
 
         if (col < 0 || col >= b->w) {
@@ -397,13 +419,13 @@ static BoardObject* genHypoBoard(int p, int x, BoardObject *b) {
 
     // Update hypo board ridge
     for(int i=0; i<pDims; i++) {
-        int rDelta = pieceFillData[p][i];
+        int rDelta = pieceFillData[p][0][i];
         if (rDelta < 0) continue;
 
         int col = x + i;
 
         // Calculate holes (unused rn)
-        int margin = pieceMarginData[p][i];
+        int margin = pieceMarginData[p][0][i];
         int holesMade = y - hb->ridge[col] + margin;
 
         // Update ridge altitude
