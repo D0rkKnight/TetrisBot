@@ -6,9 +6,10 @@ import random
 from pynput import keyboard
 import collections
 import time
+import tetrisCore
 
-stackSize = (10, 20)
-grid = np.zeros(shape=stackSize, dtype=np.uint8)
+tetrisCore.init()
+grid = tetrisCore.Board()
 
 I = 0; J = 1; L = 2; O = 3; S = 4; T = 5; Z = 6
 
@@ -53,6 +54,7 @@ holdQueued = False
 
 forcePiece = None # Hijacking purposes
 
+
 def init(cbI=None, cbL=None):
     initSim()
 
@@ -64,11 +66,11 @@ def init(cbI=None, cbL=None):
     listener.start()
 
     pygame.init()
-
     screen = pygame.display.set_mode((600, 800))
 
     running = True
     while running:
+        #print(grid)
 
         # Exit condition
         for event in pygame.event.get():
@@ -84,12 +86,13 @@ def init(cbI=None, cbL=None):
         stackOff = (50, 50)
         squareSize = (30, 30)
 
-        for x in range(grid.shape[0]):
-            for y in range(grid.shape[1]):
-                sy = stackOff[1] + (grid.shape[1]-y-1) * squareSize[1]
+        for x in range(grid.w):
+            for y in range(grid.h):
+                sy = stackOff[1] + (grid.h-y-1) * squareSize[1]
                 sx = stackOff[0] + x * squareSize[0]
 
-                cell = grid[x][y]
+                #print(x, y)
+                cell = grid.get(x, y)
                 color = (0, 0, 0)
 
                 # Draw controlled piece too
@@ -210,7 +213,7 @@ def executeHardDrop(pGrid, board, x):
     global lockQueued
 
     # Find lowest valid position
-    y = board.shape[1] - pGrid.shape[1] # Starts from the top
+    y = board.h - pGrid.shape[1] # Starts from the top
     conflict = hasConflict(pGrid, (x, y), board)
 
     # Abort if current spot is taken 
@@ -280,7 +283,7 @@ def lockPiece(pGrid, pos, board):
     for x in range(pGrid.shape[0]):
         for y in range(pGrid.shape[1]):
             if pGrid[x, y] > 0:
-                board[pos[0] + x, pos[1] + y] = pGrid[x, y]
+                board.set(pGrid[x, y], pos[0] + x, pos[1] + y)
     
     currentPiece = queue.pop(0)
     regenerateQueue()
@@ -312,7 +315,7 @@ def regenerateQueue():
         queue.append(drawPiece())
 
 def genPieceSpawn(piece):
-    return (grid.shape[0] // 2 - 1 + spawnOffset[piece], grid.shape[1] - baseRot[piece].shape[1])
+    return (grid.w // 2 - 1 + spawnOffset[piece], grid.h - baseRot[piece].shape[1])
 
 def hasConflict(grid, pos, space):
     for x in range(grid.shape[0]):
@@ -322,11 +325,11 @@ def hasConflict(grid, pos, space):
                  
                 nx = pos[0] + x
                 ny = pos[1] + y
-                if (nx < 0 or nx >= space.shape[0]):
+                if (nx < 0 or nx >= space.w):
                     return True
-                if (ny < 0 or ny >= space.shape[1]):
+                if (ny < 0 or ny >= space.h):
                     return True
-                if (space[nx, ny] > 0):
+                if (space.get(nx, ny) > 0):
                     return True
 
     return False
@@ -337,30 +340,30 @@ def lineClear(grid, sat=None):
     if sat is not None:
         hasLC = False
         for i in sat:
-            if i >= grid.shape[0]:
+            if i >= grid.w:
                 hasLC = True
                 break
 
         if not hasLC:
             return {'board' : grid, 'clears' : 0, 'lines' : []}
 
-    postClear = np.zeros(shape=grid.shape, dtype=np.uint8)
+    postClear = tetrisCore.Board()
     linesCleared = 0
     lines = []
 
-    for y in range(grid.shape[1]):
+    for y in range(grid.h):
         fullRow = True
 
-        for x in range(grid.shape[0]):
-            fullRow = grid[x, y] > 0 and fullRow
+        for x in range(grid.w):
+            fullRow = grid.get(x, y) > 0 and fullRow
         
         if fullRow:
             linesCleared += 1
             lines.append(y)
         else:
             # put line into post clear grid
-            for x in range(grid.shape[0]):
-                postClear[x, y - linesCleared] = grid[x, y]
+            for x in range(grid.w):
+                postClear.set(grid.get(x, y), x, y - linesCleared)
 
     return {'board' : postClear, 'clears' : linesCleared, 'lines' : lines}
 

@@ -1,8 +1,8 @@
-
 import numpy as np
 import collections
 import tetrisSim
 import tetrisVision
+import tetrisCore
 
 import keyboard
 
@@ -111,11 +111,14 @@ def calculate():
         grid = np.flip(grid, 1)
         grid = grid[:grid.shape[0], :grid.shape[1]-topMargin] # Trim the board as to not capture the falling piece
 
+        print("NP grid incompatible with TetrisCore grid")
+        time.sleep(1000)
+
         # Read Queue
         queue = tetrisVision.readQueue(img, blockSize)
     
     elif source == INTERNAL_SIM:
-        grid = np.copy(tetrisSim.grid)
+        grid = tetrisSim.grid.copy()
         queue = np.copy(tetrisSim.queue)
 
     
@@ -172,19 +175,6 @@ def calculate():
         wait(lineclearLatency)
 
     report(inputs)
-
-def printGrid(grid):
-    print()
-    shp = grid.shape
-    for y in range(shp[1]):
-        y = grid.shape[1]-y- 1
-        line = ''
-        for x in range(shp[0]):
-            o = '_'
-            if grid[x, y] > 0:
-                o = "O"
-            line += o
-        print(line)
 
 def hardDrop():
     if source == SCREEN_CAPTURE:
@@ -262,7 +252,7 @@ def chainMove(inHand, board):
         bestBoard = None
         blc = None
 
-        for x in range(-2, board['contents'].shape[0]):
+        for x in range(-2, board['contents'].w):
             for r in range(4):
                 result = genHypoBoard(board, nextMove, x, r)
                 if result is None:
@@ -333,7 +323,7 @@ def positionPiece(piece, board):
     bestRot = 0
     bestBoard = None
     blc = None
-    for x in range(-2, board['contents'].shape[0]):
+    for x in range(-2, board['contents'].w):
 
         # Rotations as well
         for r in range(4):
@@ -392,7 +382,7 @@ def genHypoBoard(board, piece, x, r):
         if colMargin < 0: # Check that this column has cells at all
             continue
 
-        if col < 0 or col >= bGrid.shape[0]:
+        if col < 0 or col >= bGrid.w:
             # Out of bounds!
             conflict = True
             break
@@ -402,17 +392,17 @@ def genHypoBoard(board, piece, x, r):
         y = max(y, colTop)
     
     # Abort if current spot is taken 
-    if conflict or y > bGrid.shape[1] - rotGrid.shape[1]:
+    if conflict or y > bGrid.h - rotGrid.shape[1]:
         return None
 
     # Create hypothetical board
     # Needed for future reading
-    hypoBoard = np.copy(bGrid)
+    hypoBoard = bGrid.copy()
     newSat = np.copy(sat)
     for lx in range(rotGrid.shape[0]):
         for ly in range(rotGrid.shape[1]):
             if (rotGrid[lx, ly] > 0):
-                hypoBoard[x+lx, y+ly] = rotGrid[lx, ly]
+                hypoBoard.set(rotGrid[lx, ly], x+lx, y+ly)
                 newSat[y+ly] += 1
 
     lc = tetrisSim.lineClear(hypoBoard, newSat) # TODO: This is causing a 10 ms slowdown
@@ -448,7 +438,7 @@ def genHypoBoard(board, piece, x, r):
                 newRidge[x] -= i + 1 # i being the number of line clears the ridge stack intersects with
 
                 # Account for newly exposed gaps
-                while newRidge[x] >= 0 and lc['board'][x, newRidge[x]] == 0:
+                while newRidge[x] >= 0 and lc['board'].get(x, newRidge[x]) == 0:
                     newRidge[x] -= 1
 
                     # Every one of these means a hole has been cleared.
@@ -468,7 +458,18 @@ def genHypoBoard(board, piece, x, r):
 
     return lc
 
-def genRidge(grid):
+def npGridFromTCGrid(tcGrid):
+    o = np.zeros(shape=(tcGrid.w, tcGrid.h), dtype=np.uint8)
+    for x in range(tcGrid.w):
+        for y in range(tcGrid.h):
+            o[x][y] = tcGrid.get(x, y)
+    
+    return o
+
+def genRidge(tcGrid):
+    # Needs internal link
+    grid = npGridFromTCGrid(tcGrid)
+
     o = []
     for col in grid:
         i = len(col)-1
@@ -483,7 +484,9 @@ def testPeaks(ridge):
     peak = max(ridge)
     return -peak
 
-def findHoles(grid):
+def findHoles(tcGrid):
+    grid = npGridFromTCGrid(tcGrid)
+
     holes = 0
     for col in grid:
         covered = False
@@ -501,7 +504,9 @@ def findHoles(grid):
 
     return o
 
-def findLineSaturation(grid):
+def findLineSaturation(tcGrid):
+    grid = npGridFromTCGrid(tcGrid)
+
     o = []
     for y in range(grid.shape[1]):
         i = 0
@@ -549,10 +554,6 @@ def report(data):
 def log(str=""):
     if logData:
         print(str)
-
-def logGrid(grid):
-    if logData:
-        printGrid(grid)
 
 def wait(amt):
     if latencyOn:

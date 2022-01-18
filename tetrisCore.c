@@ -18,9 +18,7 @@ int pieceDims[7] = {4, 3, 3, 2, 3, 3, 3};
 static void installPiece(int p, int *data) {
     int dim = pieceDims[p];
     int len = dim * dim;
-    int *mem = malloc(len*sizeof(int));
-
-    printf("len: %d\n", len);
+    int *mem = PyMem_Malloc(len*sizeof(int));
 
     for (int i=0; i<len; i++) {
         mem[i] = data[i];
@@ -94,6 +92,8 @@ typedef struct {
     int ** grid;
     int w;
     int h;
+    int * ridge;
+    int * sat;
 } BoardObject;
 
 static void
@@ -102,9 +102,11 @@ Board_dealloc(BoardObject *self)
     // Dealloc every row on the grid
     int **grid = self->grid;
     for (int i = 0; i<self->h; i++) {
-        free(grid[i]);
+        PyObject_Free(grid[i]);
     }
-    free(grid);
+    PyObject_Free(grid);
+    PyObject_Free(self->ridge);
+    PyObject_Free(self->sat);
 
     Py_TYPE(self)->tp_free((PyObject *) self);
 }
@@ -121,14 +123,17 @@ Board_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     int h = 20;
 
     if (self != NULL) {
-        self->grid = malloc(h * sizeof(int));
+        self->grid = PyObject_Malloc(h * sizeof(int *));
         for (int y = 0; y < h; y ++) {
-            int *row = calloc(w, sizeof(int));
+            int *row = PyObject_Calloc(w, sizeof(int));
             self->grid[y] = row;
         }
 
         self->w = w;
         self->h = h;
+
+        self->sat = PyObject_Calloc(h, sizeof(int));
+        self->ridge = PyObject_Calloc(w, sizeof(int));
     }
 
     return (PyObject *) self;
@@ -138,8 +143,6 @@ static int
 Board_init(BoardObject *self, PyObject *args, PyObject *kwds) 
 {
     // Don't do anything I guess
-    printf("Initiallizing a board! \n");
-
     return 0; // 0 means everything is ok
 }
 
@@ -154,16 +157,25 @@ static PyMemberDef Board_members[] = {
 static PyObject *
 Board_asString(BoardObject *self, PyObject *Py_UNUSED(ignored))
 {   
+
     int cells = self->w * self->h;
     int chars = cells + self->h + 1; // Cells + newlines + null term
-    char *out = malloc(sizeof(char) * chars);
+    char *out = PyMem_Malloc(sizeof(char) * chars);
+
     for (int r = 0; r<self->h; r++) {
-        int *row = self->grid[r];
+        int *row = self->grid[self->h - r - 1];
         int rowOffset = r * (self->w + 1);
 
+        //printf("row start \n");
+
         for (int c = 0; c < self->w; c++) {
+            //printf("first element: %d\n", *row);
+
             // Pull character
-            int val = self->grid[self->h - r - 1][c]; // Build from top
+            int val = row[c]; // Build from top
+
+            //printf("read val \n");
+
             int i = rowOffset + c;
             char oc = '_';
 
@@ -171,17 +183,23 @@ Board_asString(BoardObject *self, PyObject *Py_UNUSED(ignored))
                 oc = 'O';
 
             out[i] = oc;
+
+            //printf("index: %d, size: %d\n", i, chars);
         }
+        //printf("row end \n");
 
         out[rowOffset + self->w] = '\n';
+
+        //printf("newline: %d\n", rowOffset+self->w);
     }
 
     out[chars-1] = '\0'; // Terminate string
-
+    //printf("cap: %d\n", chars-1);
+    
     return PyUnicode_FromString(out);
 }
 
-bool inBounds(BoardObject *board, int x, int y) {
+static bool inBounds(BoardObject *board, int x, int y) {
     if (x < 0 || x >= board->w || y < 0 || y >= board->h) {
         printf("Index out of bounds: %d, %d\n", x, y);
         return false;
@@ -189,14 +207,18 @@ bool inBounds(BoardObject *board, int x, int y) {
 
     return true;
 }
-int getBit(BoardObject *board, int x, int y) {
+
+static int getBit(BoardObject *board, int x, int y) {
     // TODO: Make this compiler optional in case it's slowing things down
     if (!inBounds(board, x, y)) 
         return -1;
+    
+    int *row = board->grid[y];
+    int val = row[x];
 
-    return board->grid[y][x];
+    return val;
 }
-void setBit(BoardObject *board, int v, int x, int y) {
+static void setBit(BoardObject *board, int v, int x, int y) {
     if (!inBounds(board, x, y))
         return;
     
@@ -207,7 +229,7 @@ void setBit(BoardObject *board, int v, int x, int y) {
 static PyObject *
 Board_get(BoardObject *self, PyObject *args) {
     int x, y;
-    
+
     if (!PyArg_ParseTuple(args, "ii", &x, &y))
         return NULL;
 
@@ -226,16 +248,76 @@ Board_set(BoardObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
+static PyObject *
+Board_getRidge(BoardObject *self, PyObject *args) {
+    int i;
+
+    if (!PyArg_ParseTuple(args, "i", &i))
+        return NULL;
+
+    if (!inBounds(self, i, 0))
+        return NULL;
+    
+    return PyLong_FromLong(self->ridge[i]);
+}
+
+static PyObject *
+Board_setRidge(BoardObject *self, PyObject *args) {
+    int v, i;
+
+    if (!PyArg_ParseTuple(args, "ii", &v, &i))
+        return NULL;
+    
+    if (!inBounds(self, i, 0))
+        return NULL;
+
+    self->ridge[i] = v;
+    
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+Board_getSat(BoardObject *self, PyObject *args) {
+    int i;
+
+    if (!PyArg_ParseTuple(args, "i", &i))
+        return NULL;
+    
+    if (!inBounds(self, 0, i))
+        return NULL;
+
+    return PyLong_FromLong(self->sat[i]);
+}
+
+static PyObject *
+Board_setSat(BoardObject *self, PyObject *args) {
+    int v, i;
+
+    if (!PyArg_ParseTuple(args, "ii", &v, &i))
+        return NULL;
+    
+    if (!inBounds(self, 0, 1))
+        return NULL;
+
+    self->sat[i] = v;
+    Py_RETURN_NONE;
+}
+
 // Perform a deep copy of the board
 PyObject *
 Board_copy(BoardObject *self, PyObject *Py_UNUSED(ignored)) {
     BoardObject *cp;
     cp = (BoardObject *) PyObject_CallObject((PyObject *) &BoardType, NULL);
 
+    // Copy grid
     for (int r=0; r<self->h; r++) {
         // Copy row
         memcpy(cp->grid[r], self->grid[r], self->w*sizeof(int));
     }
+
+    // Copy ridge and saturation
+    memcpy(cp->ridge, self->ridge, self->w*sizeof(int));
+    memcpy(cp->sat, self->sat, self->h*sizeof(int));
 
     return (PyObject *) cp;
 }
@@ -249,6 +331,14 @@ static PyMethodDef Board_methods[] = {
     },
     {"copy", (PyCFunction) Board_copy, METH_NOARGS,
      "Performs a deep copy of the board"
+    },
+    {"getRidge", (PyCFunction) Board_getRidge, METH_VARARGS, ""
+    },
+    {"setRidge", (PyCFunction) Board_setRidge, METH_VARARGS, ""
+    },
+    {"getSat", (PyCFunction) Board_getSat, METH_VARARGS, ""
+    },
+    {"setSat", (PyCFunction) Board_setSat, METH_VARARGS, ""
     },
     {NULL}
 };
