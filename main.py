@@ -20,7 +20,7 @@ ARD = 0.17
 ARS = 0.05
 ARC = 0.1 # compensation
 
-searchDepth = 2
+searchDepth = 3
 
 firstBlock = True
 logData = False
@@ -172,21 +172,40 @@ def calculate():
     # Write ridge into board internal ridge
     for i in range(grid.w):
         grid.setRidge(ridge[i]+1, i)
+
+    # Write saturation into board internal saturation
+    for i in range(grid.h):
+        grid.setSat(sat[i], i)
+    
+    # Write holes too
+    grid.holes = holes
     
     #print("\n\n\n current piece: "+str(tetrisSim.currentPiece))
 
-    piece = searchQueue[0]
-    xDest = grid.positionPiece(piece)
+    moveset = grid.search(searchQueue, tetrisSim.hold)
+    xDest = moveset[0]
+    rot = moveset[1]
+    willHold = moveset[2]
 
     # Calculate necessary shift
-    spawnPos = tetrisSim.genPieceSpawn(piece)
+    spawnPos = tetrisSim.genPieceSpawn(searchQueue[0])
+    if (willHold):
+        spawnPos = tetrisSim.genPieceSpawn(tetrisSim.hold)
+        holdPiece()
+
     delta = xDest - spawnPos[0]
 
+    # print("Delta: "+str(delta))
+    # print("Rot: "+str(rot))
+
     #move(inputs.delta, inputs.rot)
-    move(delta, 0)
+        
+    move(delta, rot)
     hardDrop()
 
-    time.sleep(0.2)
+    #time.sleep(1)
+
+    print(time.time()-start)
 
     # if inputs.lineclears > 0:
     #     wait(lineclearLatency)
@@ -517,7 +536,7 @@ def findHoles(tcGrid):
             if covered and col[y] == 0:
                 holes += 1
     
-    o = -holes
+    o = holes
 
     return o
 
