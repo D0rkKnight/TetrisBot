@@ -31,6 +31,6 @@ static moveset search(BoardObject *self, int *queue, int levelsLeft, int hold);
 static moveResult *positionPiece(BoardObject *self, int p);
 static int calcScore(BoardObject *board);
 static moveResult *makePlay(BoardObject *board, int x, int r, int p);
-static moveResult *searchSub(BoardObject *board, int *queue, int levelsLeft, int hold, int x, int r);
+static moveset *searchSub(BoardObject *board, int *queue, int levelsLeft, int hold, int x, int r);
 
 #endif

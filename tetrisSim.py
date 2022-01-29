@@ -8,7 +8,6 @@ import collections
 import time
 import tetrisCore
 
-tetrisCore.init()
 grid = tetrisCore.Board()
 
 I = 0; J = 1; L = 2; O = 3; S = 4; T = 5; Z = 6
@@ -56,6 +55,7 @@ forcePiece = None # Hijacking purposes
 
 
 def init(cbI=None, cbL=None):
+    tetrisCore.init()
     initSim()
 
     if cbI is not None:

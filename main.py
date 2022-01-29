@@ -118,6 +118,14 @@ def calculate():
         queue = tetrisVision.readQueue(img, blockSize)
     
     elif source == INTERNAL_SIM:
+
+        # Testing (zero grid)
+        # simG = tetrisSim.grid
+        # if simG is not None:
+        #     for x in range(simG.w):
+        #         for y in range(simG.h):
+        #             simG.set(0, x, y)
+
         grid = tetrisSim.grid.copy()
         queue = np.copy(tetrisSim.queue)
 

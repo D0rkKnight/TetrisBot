@@ -6,6 +6,10 @@
 #include <structmember.h>
 #include "tetrisCore.h"
 
+#define _CRTDBG_MAP_ALLOC
+#include <stdlib.h>
+#include <crtdbg.h>
+
 // PIECE GENERATION ---------------------------
 int *pieceData[7][4];
 int *pieceMarginData[7][4];
@@ -36,12 +40,6 @@ static void installPiece(int p, int r, int *data) {
         mem[x*dim+y] = data[i];
     }
 
-    // for (int i=0; i<len; i++) {
-    //     printf("%d", mem[i]);
-    // } 
-
-    // printf("\n");
-
     pieceData[p][r] = mem;
 
     return;
@@ -69,11 +67,7 @@ static void calcPieceMargins(int p, int r, int *data) {
 
         bMem[x] = bottom;
         tMem[x] = lastCell+1;
-
-        //printf("%d", bMem[x]);
     }
-
-    //printf("\n");
 
     pieceMarginData[p][r] = bMem;
     pieceFillData[p][r] = tMem;
@@ -112,7 +106,8 @@ tetrisCore_init(PyObject *self, PyObject *args) {
         }
     }
 
-    // Do rotate variants in the future
+    // Memory leak dump flag
+    _CrtSetDbgFlag ( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
 
     Py_RETURN_NONE;
 }
@@ -215,8 +210,6 @@ boardToString(BoardObject *self) {
         for (int c = 0; c < self->w; c++) {
             // Pull character
             int val = row[c]; // Build from top
-
-            //printf("read val \n");
 
             int i = rowOffset + c;
             char oc = '_';
@@ -391,7 +384,7 @@ Board_copy(BoardObject *self, PyObject *Py_UNUSED(ignored)) {
 
 static int lineclear(BoardObject *b) {
     // Indexed buffer to hold lines for swaps
-    int **clearedBuffer = PyMem_Malloc(sizeof(int)*b->h);
+    int **clearedBuffer = PyMem_Malloc(sizeof(int *) * b->h);
     int clearAddIndex = 0;
     int clearPullIndex = 0;
     int addLine = 0;
@@ -412,33 +405,38 @@ static int lineclear(BoardObject *b) {
         }
     }
 
-    if (clearAddIndex == 0) return 0;
+    if (clearAddIndex > 0) {
+        // Fill cleared lines back in as empty
+        for (int r=0; r<clearAddIndex; r++) {
+            int *row = clearedBuffer[r];
+            memset(row, 0, sizeof(int)*b->w); // Clear row out
+            b->grid[addLine+r] = row;
+        }
 
-    // Fill cleared lines back in as empty
-    for (int r=0; r<clearAddIndex; r++) {
-        int *row = clearedBuffer[r];
-        memset(row, 0, sizeof(int)*b->w); // Clear row out
-        b->grid[addLine+r] = row;
-    }
+        // Recalculate ridges and open up holes
+        for(int x=0; x<b->w; x++) {
+            for (int l=lineArrSize-1; l>=0; l--) {
+                if (b->ridge[x] > lineArr[l]) {
+                    b->ridge[x] -= l+1;
 
-    // Recalculate ridges and open up holes
-    for(int x=0; x<b->w; x++) {
-        for (int l=lineArrSize-1; l>=0; l--) {
-            if (b->ridge[x] > lineArr[l]) {
-                b->ridge[x] -= l+1;
+                    // Account for newly exposed gaps
+                    while (b->ridge[x] > 0 && getBitUnchecked(b, x, b->ridge[x]-1) == 0) {
+                        b->ridge[x] -= 1;
 
-                // Account for newly exposed gaps
-                while (b->ridge[x] > 0 && getBitUnchecked(b, x, b->ridge[x]-1) == 0) {
-                    b->ridge[x] -= 1;
+                        // Every one of these means a hole has been cleared.
+                        b->holes --;
+                    }
 
-                    // Every one of these means a hole has been cleared.
-                    b->holes --;
+                    break;
                 }
-
-                break;
             }
         }
     }
+
+    // Dealloc
+    PyMem_Free(clearedBuffer); // Only top buffer since it contains pointers to persistent data
+    PyMem_Free(lineArr); // Might be needed later
+
 
     // Return number of lineclears
     return clearAddIndex;
@@ -470,6 +468,7 @@ static BoardObject* genHypoBoard(int p, int x, int r, BoardObject *b) {
 
     // Create a hypothetical board
     BoardObject *hb = (BoardObject *) Board_copy(b, NULL);
+
     for (int lx=0; lx<pDims; lx++) {
         for (int ly=0; ly<pDims; ly++) {
             int cell = pData[lx*pDims + ly];
@@ -517,16 +516,12 @@ static int testPeaks(BoardObject *b) {
 static int testPits(BoardObject *b) {
     int o = 0;
 
-    //printBoard(b);
-
     for(int i=1; i<b->w; i++){
         int prevAlt = b->ridge[i-1];
         int nextAlt = b->ridge[i];
 
         int diff = nextAlt-prevAlt;
         if (diff<0) diff*=-1;
-
-        //printf("advance: %d, ridge: %d\n", diff, b->ridge[i]);
 
         o += diff;
     }
@@ -547,8 +542,6 @@ Board_search(BoardObject *self, PyObject *args) {
         return NULL;
 
     int qLen = PyList_Size(queueObj);
-    printf("Queue size: %d\n", qLen);
-    printf("Hold: %d\n", hold1);
 
     // Construct initial data (hold branching will occur within the recursive search)
     int *queue = PyMem_Malloc(sizeof(int) * qLen);
@@ -572,8 +565,11 @@ Board_search(BoardObject *self, PyObject *args) {
 }
 
 static void destroy(moveResult *res) {
-    if (res != NULL) PyMem_Free(res->gridResult);
-    PyMem_Free(res);
+    // Decref attached board
+    if (res != NULL) {
+        Py_DECREF(res->gridResult);
+        PyMem_Free(res);
+    }
 }
 
 // Recursive function has a f1-f2-f1-f2 branch structure
@@ -587,66 +583,68 @@ search(BoardObject *board, int *queue1, int levelsLeft, int hold1) {
     int hold2 = queue1[0];
 
     // Make a play
-    moveResult *bestRes = NULL;
+    moveset bestMove = {.score=INT_MIN};
     for (int x=-2; x<board->w; x++) {
         for (int r=0; r<4; r++) {
             // Pull score
-            moveResult *res1 = searchSub(board, queue1, levelsLeft-1, hold1, x, r);
-            moveResult *res2 = searchSub(board, queue2, levelsLeft-1, hold2, x, r);
-            if (res2 != NULL) res2->move.hold = true; // Specifying that this option entails a hold
+            moveset *m1 = searchSub(board, queue1, levelsLeft-1, hold1, x, r);
+            moveset *m2 = searchSub(board, queue2, levelsLeft-1, hold2, x, r);
+            
+            if (m2 != NULL) m2->hold = true; // Specifying that this option entails a hold
 
-            if (res1 == NULL && res2 == NULL) continue;
+            if (m1 == NULL && m2 == NULL) continue;
 
             // Selecting the better choice and deallocating the other
-            moveResult *choice = res1;
-            if (res1 == NULL || (res2 != NULL && res2->move.score > res1->move.score)) {
-                choice=res2;
-                destroy(res1);
-            } else {
-                destroy(res2);
+            moveset *choice = m1;
+            if (m1 == NULL || (m2 != NULL && m2->score > m1->score)) {
+                choice=m2;
             }
 
             // Compare choice against the current best choice
-            if (bestRes == NULL || choice->move.score > bestRes->move.score) {
-                destroy(bestRes);
-                bestRes = choice;
-            } else {
-                destroy(choice);
+            if (choice->score > bestMove.score) {
+                bestMove = *choice;
             }
+
+            PyMem_Free(m1);
+            PyMem_Free(m2);
         }
     }
 
-    moveset o = {.score = -100000};
-    if (bestRes != NULL) o = bestRes->move;
+    // Dealloc
+    PyMem_Free(queue2);
 
-    return o;
+    return bestMove;
 }
 
-static moveResult *searchSub(BoardObject *board, int *queue, int levelsLeft, int hold, int x, int r) {
+static moveset *searchSub(BoardObject *board, int *queue, int levelsLeft, int hold, int x, int r) {
     // Pull score
     moveResult *res = makePlay(board, x, r, queue[0]);
     if (res == NULL) return NULL;
 
-    // Stop branching if last level
-    if (levelsLeft == 0) return res;
+    moveset *o = PyMem_Malloc(sizeof(moveset));
+    *o = res->move;
 
-    // Shorten queue
-    int *newQueue = PyMem_Malloc(sizeof(int)*levelsLeft);
-    for (int i=0; i<levelsLeft; i++) newQueue[i] = queue[i+1];
+    if (levelsLeft > 0) {
+        // Shorten queue
+        int *newQueue = PyMem_Malloc(sizeof(int)*levelsLeft);
+        for (int i=0; i<levelsLeft; i++) newQueue[i] = queue[i+1];
 
-    // Adopt the scoring of all child outcomes
-    int futureScore = search(res->gridResult, newQueue, levelsLeft, hold).score;
-    res->move.score = futureScore;
+        // Adopt the scoring of all child outcomes
+        int futureScore = search(res->gridResult, newQueue, levelsLeft, hold).score;
+        res->move.score = futureScore;
 
-    return res;
+        PyMem_Free(newQueue); // Done w/ this
+    }
+
+    destroy(res);
+    return o;
 }
 
 static moveResult *makePlay(BoardObject *board, int x, int r, int p) {
     // Pull score
     BoardObject *results = genHypoBoard(p, x, r, board);
+    // BoardObject *results = (BoardObject *) Board_copy(board, NULL);
     if (results == NULL) return NULL;
-
-    //printBoard(results);
 
     int score = calcScore(results);
 
