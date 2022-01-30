@@ -1,5 +1,6 @@
 setup.py
 tetrisCore.c
+tetrisCore_Search.c
 TetrisCore.egg-info/PKG-INFO
 TetrisCore.egg-info/SOURCES.txt
 TetrisCore.egg-info/dependency_links.txt
