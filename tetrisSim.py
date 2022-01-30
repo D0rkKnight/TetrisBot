@@ -350,6 +350,7 @@ def lineClear(grid, sat=None):
     postClear = tetrisCore.Board()
     linesCleared = 0
     lines = []
+    
 
     for y in range(grid.h):
         fullRow = True

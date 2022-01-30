@@ -85,8 +85,6 @@ static void installPieceBitstring(int p, int r, int *data) {
     }
 
     pieceBitstrings[p][r] = o;
-
-    printBitstringAsString(sizeof(unsigned int), &o);
 }
 
 // Assumes little endian, from https://stackoverflow.com/questions/111928/is-there-a-printf-converter-to-print-in-binary-format
@@ -97,7 +95,7 @@ static void printBitstringAsString(size_t const size, void const * const ptr) {
 
     for (i = ((int) size)-1; i >= 0; i--) {
         for (j = 7; j >= 0; j--) {
-            byte = (b[i] >> j) & 1;
+            byte = (b[i] >> j) & 1U;
             printf("%u", byte);
         }
     }
@@ -143,7 +141,7 @@ tetrisCore_init(PyObject *self, PyObject *args) {
 }
 
 static int getPieceBit(int p, int r, int x, int y) {
-    return pieceBitstrings[p][r] >> (x * pieceDims[p] + y) & 1;
+    return pieceBitstrings[p][r] >> (x * pieceDims[p] + y) & 1U;
 }
 
 PyObject *
@@ -160,12 +158,8 @@ tetrisCore_getPieceDim(PyObject *self, PyObject *args) {
 static void
 Board_dealloc(BoardObject *self) 
 {
-    // Dealloc every row on the grid
-    int **grid = self->grid;
-    for (int i = 0; i<self->h; i++) {
-        PyObject_Free(grid[i]);
-    }
-    PyObject_Free(grid);
+    // Grid is 1D array so direct deallocation is safe
+    PyObject_Free(self->grid);
     PyObject_Free(self->ridge);
     PyObject_Free(self->sat);
 
@@ -184,12 +178,7 @@ Board_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     int h = 20;
 
     if (self != NULL) {
-        self->grid = PyObject_Malloc(h * sizeof(int *));
-        for (int y = 0; y < h; y ++) {
-            int *row = PyObject_Calloc(w, sizeof(int));
-            self->grid[y] = row;
-        }
-
+        self->grid = PyObject_Calloc(h, sizeof(int));
         self->w = w;
         self->h = h;
 
@@ -226,12 +215,12 @@ boardToString(BoardObject *self) {
     char *out = PyMem_Malloc(sizeof(char) * chars);
 
     for (int r = 0; r<self->h; r++) {
-        int *row = self->grid[self->h - r - 1];
+        int row = self->grid[self->h - r - 1];
         int rowOffset = r * (self->w + 1);
 
         for (int c = 0; c < self->w; c++) {
             // Pull character
-            int val = row[c]; // Build from top
+            int val = row >> c & 1U; // Build from top
 
             int i = rowOffset + c;
             char oc = '_';
@@ -282,27 +271,31 @@ static int getBit(BoardObject *board, int x, int y) {
     // TODO: Make this compiler optional in case it's slowing things down
     if (!inBounds(board, x, y)) 
         return -1;
-    
-    int *row = board->grid[y];
-    int val = row[x];
 
-    return val;
+    return getBitUnchecked(board, x, y);
 }
 static void setBit(BoardObject *board, int v, int x, int y) {
     if (!inBounds(board, x, y))
         return;
     
-    board->grid[y][x] = v;
+    setBitUnchecked(board, v, x, y);
     return;
 }
 
 static void setBitUnchecked(BoardObject *board, int v, int x, int y) {
-    board->grid[y][x] = v;
+    int row = board->grid[y];
+    if (v > 0) row = row | (1 << x);
+    else row = row & ~(1 << x);
+
+    board->grid[y] = row;
     return;
 }
 
 static int getBitUnchecked(BoardObject *board, int x, int y) {
-    return board->grid[y][x];
+    int row = board->grid[y];
+    int val = row >> x & 1U;
+
+    return val;
 }
 
 static PyObject *
@@ -389,10 +382,7 @@ Board_copy(BoardObject *self, PyObject *Py_UNUSED(ignored)) {
     cp = (BoardObject *) PyObject_CallObject((PyObject *) &BoardType, NULL);
 
     // Copy grid
-    for (int r=0; r<self->h; r++) {
-        // Copy row
-        memcpy(cp->grid[r], self->grid[r], self->w*sizeof(int));
-    }
+    memcpy(cp->grid, self->grid, self->h*sizeof(int));
 
     // Copy ridge and saturation
     memcpy(cp->ridge, self->ridge, self->w*sizeof(int));
@@ -406,7 +396,6 @@ Board_copy(BoardObject *self, PyObject *Py_UNUSED(ignored)) {
 
 static int lineclear(BoardObject *b) {
     // Indexed buffer to hold lines for swaps
-    int **clearedBuffer = PyMem_Malloc(sizeof(int *) * b->h);
     int clearAddIndex = 0;
     int clearPullIndex = 0;
     int addLine = 0;
@@ -416,7 +405,6 @@ static int lineclear(BoardObject *b) {
 
     for (int r=0; r<b->h; r++) {
         if (b->sat[r] >= b->w) {
-            clearedBuffer[clearAddIndex] = b->grid[r];
             clearAddIndex ++;
 
             lineArr[lineArrSize] = r;
@@ -430,9 +418,7 @@ static int lineclear(BoardObject *b) {
     if (clearAddIndex > 0) {
         // Fill cleared lines back in as empty
         for (int r=0; r<clearAddIndex; r++) {
-            int *row = clearedBuffer[r];
-            memset(row, 0, sizeof(int)*b->w); // Clear row out
-            b->grid[addLine+r] = row;
+            b->grid[addLine+r] = 0;
         }
 
         // Recalculate ridges and open up holes
@@ -456,7 +442,6 @@ static int lineclear(BoardObject *b) {
     }
 
     // Dealloc
-    PyMem_Free(clearedBuffer); // Only top buffer since it contains pointers to persistent data
     PyMem_Free(lineArr); // Might be needed later
 
 
