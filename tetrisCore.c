@@ -18,6 +18,8 @@ int *pieceFillData[7][4];
 enum piece{I, J, L, O, S, T, Z};
 int pieceDims[7] = {4, 3, 3, 2, 3, 3, 3};
 
+int pieceBitstrings[7][4];
+
 static void installPiece(int p, int r, int *data) {
     int dim = pieceDims[p];
     int len = dim * dim;
@@ -74,6 +76,35 @@ static void calcPieceMargins(int p, int r, int *data) {
     pieceFillData[p][r] = tMem;
 }
 
+static void installPieceBitstring(int p, int r, int *data) {
+    int len = pieceDims[p] * pieceDims[p];
+    unsigned o = 0;
+    
+    for (int i = 0; i<len; i++) {
+        o = o | (data[i] << i);
+    }
+
+    pieceBitstrings[p][r] = o;
+
+    printBitstringAsString(sizeof(unsigned int), &o);
+}
+
+// Assumes little endian, from https://stackoverflow.com/questions/111928/is-there-a-printf-converter-to-print-in-binary-format
+static void printBitstringAsString(size_t const size, void const * const ptr) {
+    unsigned char *b = (unsigned char *) ptr;
+    unsigned char byte;
+    int i, j;
+
+    for (i = ((int) size)-1; i >= 0; i--) {
+        for (j = 7; j >= 0; j--) {
+            byte = (b[i] >> j) & 1;
+            printf("%u", byte);
+        }
+    }
+
+    printf("\n");
+}
+
 PyObject *
 tetrisCore_init(PyObject *self, PyObject *args) {
     // Initialize pieces (1st quadrant, x-y indexing)
@@ -104,25 +135,15 @@ tetrisCore_init(PyObject *self, PyObject *args) {
         for (int r=0; r<4; r++) {
             installPiece(a, r, tp[a]);
             calcPieceMargins(a, r, pieceData[a][r]);
+            installPieceBitstring(a, r, pieceData[a][r]);
         }
     }
-
-    // Memory leak dump flag
-    _CrtSetDbgFlag ( _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF );
 
     Py_RETURN_NONE;
 }
 
-PyObject *
-tetrisCore_getPieceBit(PyObject *self, PyObject *args) {
-    int p;
-    int x;
-    int y;
-
-    if (!PyArg_ParseTuple(args, "iii", &p, &x, &y))
-        return NULL;
-
-    return PyLong_FromLong(pieceData[p][0][x * pieceDims[p] + y]);
+static int getPieceBit(int p, int r, int x, int y) {
+    return pieceBitstrings[p][r] >> (x * pieceDims[p] + y) & 1;
 }
 
 PyObject *
@@ -445,7 +466,6 @@ static int lineclear(BoardObject *b) {
 
 BoardObject* Board_genHypoBoard(int p, int x, int r, BoardObject *b) {
     int pDims = pieceDims[p];
-    int *pData = pieceData[p][r];
     
     // Perform the ridge march
     int y=-2;
@@ -472,7 +492,7 @@ BoardObject* Board_genHypoBoard(int p, int x, int r, BoardObject *b) {
 
     for (int lx=0; lx<pDims; lx++) {
         for (int ly=0; ly<pDims; ly++) {
-            int cell = pData[lx*pDims + ly];
+            int cell = getPieceBit(p, r, lx, ly);
 
             if (cell > 0) {
                 setBitUnchecked(hb, cell, x+lx, y+ly); // Unchecked for sp e e d.
@@ -587,7 +607,6 @@ static PyTypeObject BoardType = {
 
 static PyMethodDef coreMethods[] = {
     {"init", tetrisCore_init, METH_VARARGS, "Initializes the Tetris Core."},
-    {"getPieceBit", tetrisCore_getPieceBit, METH_VARARGS, "Retrieves a cell from a tetromino."},
     {"getPieceDim", tetrisCore_getPieceDim, METH_VARARGS, "Retrieves dimensions for a tetromino."},
     {NULL, NULL, 0, NULL}
 };

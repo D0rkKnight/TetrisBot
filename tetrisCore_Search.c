@@ -11,7 +11,7 @@ Board_search(BoardObject *self, PyObject *args) {
     if (!PyList_Check(queueObj))
         return NULL;
 
-    int qLen = PyList_Size(queueObj);
+    int qLen = (int) PyList_Size(queueObj);
 
     // Construct initial data (hold branching will occur within the recursive search)
     int *queue = PyMem_Malloc(sizeof(int) * qLen);
