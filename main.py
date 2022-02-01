@@ -20,7 +20,7 @@ ARD = 0.17
 ARS = 0.05
 ARC = 0.1 # compensation
 
-searchDepth = 3
+searchDepth = 4
 
 firstBlock = True
 logData = False
@@ -29,6 +29,8 @@ INTERNAL_SIM = 0
 SCREEN_CAPTURE = 1
 source = INTERNAL_SIM
 hasInputLag = False
+divergenceRatio = 1
+divergeIter = 0
 
 MoveInput = collections.namedtuple('MoveInput', 'delta rot board score iScore lineclears piece')
 
@@ -119,25 +121,8 @@ def calculate():
         queue = tetrisVision.readQueue(img, blockSize)
     
     elif source == INTERNAL_SIM:
-
-        # Testing (zero grid)
-        # simG = tetrisSim.grid
-        # if simG is not None:
-        #     for x in range(simG.w):
-        #         for y in range(simG.h):
-        #             simG.set(0, x, y)
-
         grid = tetrisSim.grid.copy()
         queue = np.copy(tetrisSim.queue)
-
-    
-
-    # Check for misinputs
-    # if (currentBoard is not None) and not np.array_equal(grid, currentBoard):
-    #     log("MISINPUT: Delta between the following boards. 1: detected board 2: expected board")
-    #     logGrid(grid)
-    #     logGrid(currentBoard)
-    #     log()
 
     # Place a block
     global firstBlock 
@@ -161,17 +146,6 @@ def calculate():
     
     start = time.time() # Speedtests
     
-    # inputs = chainMove({'queue' : searchQueue, 'hold' : tetrisSim.hold}, 
-    #       {'contents' : grid, 'ridge' : ridge, 'holes' : holes, 'saturation' : sat, 'iScore' : 0})
-        
-    # print(time.time() - start)
-
-    # if inputs.piece != tetrisSim.currentPiece: # Means it was swapped for a hold
-    #     log("Current piece before hold: " + str(tetrisSim.currentPiece))
-    #     log("Held piece before hold: " + str(tetrisSim.hold))
-    #     holdPiece()
-    #     log("")
-    
     # Print queue
     for i in range(len(queue)):
         log('Element ' + str(i) + ' of queue is ' + str(queue[i]))
@@ -184,12 +158,24 @@ def calculate():
     # Write holes too
     grid.holes = holes
     
-    #print("\n\n\n current piece: "+str(tetrisSim.currentPiece))
-
+    measure1 = time.time()
     moveset = grid.search(searchQueue, tetrisSim.hold)
     xDest = moveset[0]
     rot = moveset[1]
     willHold = moveset[2]
+    measure1 = time.time()-measure1
+    
+    measure2 = time.time()
+    moveset = grid.search(searchQueue[0:len(searchQueue)-1], tetrisSim.hold)
+    measure2 = time.time()-measure2
+    
+    global divergenceRatio, divergeIter
+    if (measure2 != 0):
+        divergeIter += 1
+        divergenceRatio = (divergenceRatio*divergeIter + measure1/measure2)/(divergeIter + 1)
+        print("Divergence: "+str(divergenceRatio))
+    
+    
 
     # Calculate necessary shift
     spawnPos = tetrisSim.genPieceSpawn(searchQueue[0])
@@ -198,12 +184,6 @@ def calculate():
         holdPiece()
 
     delta = xDest - spawnPos[0]
-
-    # print("Delta: "+str(delta))
-    # print("Rot: "+str(rot))
-
-    #move(inputs.delta, inputs.rot)
-        
     move(delta, rot)
     hardDrop()
 
@@ -277,227 +257,6 @@ def ping(key):
     keyboard.press_and_release(key)
     wait(latency)
 
-def chainMove(inHand, board):
-    hand = {'queue' : inHand['queue'].copy(), 'hold' : inHand['hold']}
-    nextMove = hand['queue'].pop(0)
-
-
-    # Make an arbitrary move
-
-    if len(hand['queue']) > 0:
-        maxScore = -100000
-        maxIScore = -100000
-        bestSpot = 0
-        bestRot = 0
-        bestBoard = None
-        blc = None
-
-        for x in range(-2, board['contents'].w):
-            for r in range(4):
-                result = genHypoBoard(board, nextMove, x, r)
-                if result is None:
-                    continue
-                hypoGrid = result['board']
-                ridge = result['ridge']
-                holes = board['holes'] + result['hole delta']
-                nextBoard = {'contents' : hypoGrid, 'ridge' : ridge, 'holes' : holes, 'saturation' : result['saturation']
-                            , 'iScore' : result['iScore']}
-
-                # Create alternate queue that has a hold swap
-                newHold = hand['queue'][0]
-                newQueue = []
-                for i in range(len(hand['queue'])):
-                    if i == 0:
-                        newQueue.append(hand['hold'])
-                    else:
-                        newQueue.append(hand['queue'][i])
-                newHand = {'queue' : newQueue, 'hold' : newHold}
-
-                # Now that the board state is resolved, bind score outcome to child score outcome
-                nhOutcome = chainMove(newHand, nextBoard)
-                ohOutcome = chainMove(hand, nextBoard)
-
-
-                # Boilerplate lifted from elsewhere
-                if nhOutcome.score + nhOutcome.iScore > maxScore + maxIScore:
-                    maxScore = max(maxScore, nhOutcome.score)
-                    maxIScore = max(maxIScore, nhOutcome.iScore)
-                    bestSpot = x
-                    bestRot = r
-                    bestBoard = nextBoard
-                    blc = result
-                if ohOutcome.score + ohOutcome.iScore > maxScore + maxIScore:
-                    maxScore = max(maxScore, ohOutcome.score)
-                    maxIScore = max(maxIScore, ohOutcome.iScore)
-                    bestSpot = x
-                    bestRot = r
-                    bestBoard = nextBoard
-                    blc = result
-
-        spawnPos = tetrisSim.genPieceSpawn(nextMove)
-        delta = bestSpot - spawnPos[0]
-
-        lineClears = 0
-        if blc is not None:
-            lineClears = blc['clears']
-                
-        return MoveInput(delta, bestRot, bestBoard, maxScore, maxIScore, lineClears, nextMove) 
-        # Report that the move popped for this layer has this score
-
-    else:
-        # Means that we are at end of the queue, just score like normal
-        # Just scoring, not actually updating the hold
-        s1 = positionPiece(nextMove, board)
-        s2 = positionPiece(hand['hold'], board)
-
-        if  s1.score + s1.iScore > s2.score + s2.iScore:
-            return s1
-        return s2
-
-def positionPiece(piece, board):
-
-    # Try it in every location for validity
-    maxScore = -100000
-    maxIScore = -100000
-    bestSpot = 0
-    bestRot = 0
-    bestBoard = None
-    blc = None
-    for x in range(-2, board['contents'].w):
-
-        # Rotations as well
-        for r in range(4):
-            results = genHypoBoard(board, piece, x, r)
-            if results is None:
-                continue
-
-            hypoBoard = results['board']
-
-            # Generate ridge
-            ridge = results['ridge']
-            holes = results['hole delta'] + board['holes']
-
-            score = 0
-            score += testPeaks(ridge) * 0.5
-            score += testHoles(holes) * -10
-            score += testPits(ridge)
-            
-            score += tetrisFinder(results['clears']) * 40
-
-            if score + results['iScore'] > maxScore + maxIScore:
-                maxScore = score
-                maxIScore = results['iScore']
-                bestSpot = x
-                bestRot = r
-                bestBoard = {'contents' : hypoBoard, 'ridge' : ridge}
-                blc = results
-            
-            
-    
-    # Calculate deltas from the best spot
-    spawnPos = tetrisSim.genPieceSpawn(piece)
-    delta = bestSpot - spawnPos[0]
-
-    lineClears = 0
-    if blc is not None:
-        lineClears = blc['clears']
-    
-    
-
-    return MoveInput(delta, bestRot, bestBoard, maxScore, maxIScore, lineClears, piece)
-
-def genHypoBoard(board, piece, x, r):
-    rotGrid = tetrisSim.rotVars[piece][r]
-    bGrid = board['contents']
-    ridge = board['ridge']
-    sat = board['saturation']
-
-    # Find lowest valid position
-    # Estimate top of ridge
-    y = -2
-    conflict = False
-    for i in range(rotGrid.shape[0]):
-        col = x + i
-        colMargin = tetroMarginBuffer[piece][r][i]
-        if colMargin < 0: # Check that this column has cells at all
-            continue
-
-        if col < 0 or col >= bGrid.w:
-            # Out of bounds!
-            conflict = True
-            break
-
-        colTop = ridge[col] + 1 - colMargin
-
-        y = max(y, colTop)
-    
-    # Abort if current spot is taken 
-    if conflict or y > bGrid.h - rotGrid.shape[1]:
-        return None
-
-    # Create hypothetical board
-    # Needed for future reading
-    hypoBoard = bGrid.copy()
-    newSat = np.copy(sat)
-    for lx in range(rotGrid.shape[0]):
-        for ly in range(rotGrid.shape[1]):
-            if (rotGrid[lx, ly] > 0):
-                hypoBoard.set(rotGrid[lx, ly], x+lx, y+ly)
-                newSat[y+ly] += 1
-
-    lc = tetrisSim.lineClear(hypoBoard, newSat) # TODO: This is causing a 10 ms slowdown
-
-
-    # Counting holes
-    holesMade = 0
-    holesRemoved = 0
-
-    # Update ridge
-    newRidge = np.copy(board['ridge'])
-    for i in range(rotGrid.shape[0]):
-        ridgeDelta = tetroRidgeBuffer[piece][r][i]
-        if ridgeDelta < 0:
-            continue
-
-        col = x + i
-
-        # See if there is a gap in the old ridge and the new piece
-        # Do before the new ridge is recalculated
-        margin = tetroMarginBuffer[piece][r][i]
-        holesMade += y - (newRidge[col] + 1) + margin
-
-        # Update ridge since we already have the y value
-        newRidge[col] = y + ridgeDelta - 1
-
-    lines = lc['lines']
-    for x in range(len(newRidge)):
-
-        for y in range(len(lines)):
-            i = len(lines) - y - 1
-            if newRidge[x] >= lines[i]:
-                newRidge[x] -= i + 1 # i being the number of line clears the ridge stack intersects with
-
-                # Account for newly exposed gaps
-                while newRidge[x] >= 0 and lc['board'].get(x, newRidge[x]) == 0:
-                    newRidge[x] -= 1
-
-                    # Every one of these means a hole has been cleared.
-                    holesRemoved += 1
-
-                break
-    
-    holeDelta = holesMade - holesRemoved
-
-    lc['ridge'] = newRidge
-    lc['hole delta'] = holeDelta
-    lc['saturation'] = newSat
-
-    iScore = board['iScore']
-    iScore += stackBuilder(lc['clears']) * 7
-    lc['iScore'] = iScore
-
-    return lc
-
 def npGridFromTCGrid(tcGrid):
     o = np.zeros(shape=(tcGrid.w, tcGrid.h), dtype=np.uint8)
     for x in range(tcGrid.w):
@@ -518,11 +277,6 @@ def genRidge(tcGrid):
     
         o.append(i)
     return o
-
-# Evaluate score on the highest points
-def testPeaks(ridge):
-    peak = max(ridge)
-    return -peak
 
 def findHoles(tcGrid):
     grid = npGridFromTCGrid(tcGrid)
@@ -556,40 +310,6 @@ def findLineSaturation(tcGrid):
         o.append(i)
     
     return o
-
-# Doesn't do anything ig
-def testHoles(holes):
-    return holes
-
-def testPits(ridge):
-    o = 0
-
-    for i in range(1, len(ridge)):
-        prevAlt = ridge[i-1]
-        nextAlt = ridge[i]
-
-        o -= abs(nextAlt-prevAlt)
-
-    return o
-
-def stackBuilder(lineClears):
-    if 0  < lineClears < 4:
-        return -1
-    return 0
-
-def tetrisFinder(lineClears):
-    if lineClears == 4:
-        return 1
-    return 0
-
-def report(data):
-    log('delta: '+str(data.delta))
-    log('rot: '+str(data.rot))
-    log(data.board)
-    log('^ Board should be')
-    log('Piece: '+str(data.piece))
-    log("Hold is: " + str(tetrisSim.hold))
-    log('_'*20)
 
 def log(str=""):
     if logData:

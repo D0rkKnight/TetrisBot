@@ -7,7 +7,7 @@ cacheMap *cMap = NULL;
 int searchCounter = 0;
 
 void Search_init() {
-    cMap = genCacheMap(500007);
+    cMap = genCacheMap(2500009);
     //cMap = genCacheMap(12899);
     //cMap = genCacheMap(17);
 }
@@ -117,10 +117,8 @@ static moveset *searchSub(BoardObject *board, int *queue, int levelsLeft, int ho
         int *newQueue = PyMem_Malloc(sizeof(int)*levelsLeft);
         for (int i=0; i<levelsLeft; i++) newQueue[i] = queue[i+1];
 
-        // Test hashing function
+        // Check against cache
         unsigned bag = tetrisCore_getBag();
-        //printf("Data- P1: %d, Hold: %d, levels Left: %d, bag: %u, iScore: %d\n", newQueue[0], hold, levelsLeft, bag, o->inherScore);
-
         int conflict = cacheGameState(res->gridResult, newQueue[0], hold, levelsLeft, bag, o->inherScore, cMap);
 
         if (conflict) {
@@ -137,7 +135,6 @@ static moveset *searchSub(BoardObject *board, int *queue, int levelsLeft, int ho
 
         int futureScore = nextMove.score;
         res->move.score = futureScore;
-
         // Inherited score is returned by search as its true value
 
         PyMem_Free(newQueue); // Done w/ this
@@ -228,9 +225,15 @@ static int calcScore(BoardObject *board) {
 static int calcInherScore(BoardObject *board, lcReturn lc) {
     int s = 0;
     s += tetrisFinder(lc) * 50;
-    s += stackBuilder(lc) * -5;
+    s += stackBuilder(lc) * -10;
 
     return s;
+}
+
+static int getHashMid(int hash, int segLen) {
+    const int margin = (sizeof(int)-segLen)/2;
+
+    return (hash << margin) >> (margin * 2);
 }
 
 static int hashGameState(cacheEntry ent, cacheMap *map) {
@@ -239,15 +242,22 @@ static int hashGameState(cacheEntry ent, cacheMap *map) {
         hash *= ent.grid[i]+1;
         hash %= map->len;
     }
-
-        
-    if (hash == 0) printf("uh oh");
+    getHashMid(hash, map->len);
 
     hash *= ent.pieces;
-    hash *= ent.levelsLeft;
-    hash *= ent.bag+1;
-    hash *= ent.inherScore+1;
+    //hash %= map->len;
+    getHashMid(hash, map->len);
 
+    hash *= ent.bag+1;
+    //hash %= map->len;
+    getHashMid(hash, map->len);
+
+    // Levels left should not impact hash but should impact collision, as with inherited score (alpha beta pruning)
+    // hash *= ent.levelsLeft;
+    // //hash *= hash;
+    // //hash %= map->len;
+    // getHashMid(hash, map->len);
+    // hash *= ent.inherScore+1; // I wonder how often this clash comes up anyways
 
     hash %= map->len;
 
@@ -260,9 +270,7 @@ static int checkBoardStateSimilarity(cacheEntry *new, cacheEntry *old) {
     if (new->h != old->h) return false;
 
     // Check board
-    for (int i=0; i<new->h; i++) {
-        if (new->grid[i] != old->grid[i]) return false;
-    }
+    if (memcmp(new->grid, old->grid, sizeof(int) * new->h) != 0) return false;
 
     if (new->levelsLeft > old->levelsLeft) return false;
     if (new->bag != old->bag) return false;
@@ -284,6 +292,22 @@ static int cacheGameState(BoardObject *board, int piece1, int piece2, int levels
     *entPtr = ent;
 
     int hash = hashGameState(ent, map);
+
+    // Try alternate no-list system (ITS SLOWER)
+    // if (map->cells[hash] == NULL) {
+    //     map->cells[hash] = entPtr;
+    // } else {
+    //     cacheEntry *curr = map->cells[hash];
+    //     if (checkBoardStateSimilarity(entPtr, curr)) {
+    //         destroyCacheEntry(entPtr); // Free entry if unused
+    //         return true; // Check for conflict w/ first element
+    //     }
+
+    //     destroyCacheEntry(curr);
+    //     map->cells[hash] = entPtr;
+    // }
+
+    // return false;
 
     // Try to install hash
     if (map->cells[hash] == NULL) {
@@ -341,6 +365,39 @@ static void destroyCacheEntry(cacheEntry *ent) {
 }
 
 static void clearCache(cacheMap *cMap) {
+    // // Profile key distribution
+    // int deltas = 0;
+    // int empty = 0;
+    // int maxListLen = 0;
+    // int prev = 0;
+    // for (unsigned i=0; i<cMap->len; i++) {
+    //     int listDepth = 0;
+    //     cacheEntry *node = cMap->cells[i];
+    //     while(node != NULL) {
+    //         listDepth ++;
+    //         node = node->next;
+    //     }
+
+    //     // Check max
+    //     if (listDepth > maxListLen) maxListLen = listDepth;
+
+    //     // Get abs difference
+    //     int diff = listDepth - prev;
+    //     if (diff < 0) diff *= -1;
+
+    //     // Ignore empty stretches, those are bad
+    //     if (diff == 0 && listDepth == 0) empty ++;
+
+    //     deltas += diff;
+    //     prev = listDepth;
+    // }
+
+    // float aveDelta = ((float) deltas) / (cMap->len-empty);
+
+    // float fill = (((float) cMap->len) - empty) / cMap->len;
+
+    // printf("Max: %d, Ave. Delta: %f, Fill ratio: %f\n", maxListLen, aveDelta, fill);
+
     // Go through and clear everything
     for (unsigned i=0; i<cMap->len; i++) {
         // Dealloc linked lists

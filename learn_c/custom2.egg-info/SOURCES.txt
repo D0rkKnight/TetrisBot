@@ -1,6 +1,0 @@
-custom2.c
-setup.py
-custom2.egg-info/PKG-INFO
-custom2.egg-info/SOURCES.txt
-custom2.egg-info/dependency_links.txt
-custom2.egg-info/top_level.txt
