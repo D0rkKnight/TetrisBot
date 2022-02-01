@@ -17,10 +17,6 @@ typedef struct {
 } moveResult;
 
 typedef struct {
-    
-} 
-
-typedef struct {
     int *grid;
     int pieces; // Just current pieces, queue should be the same if the depth is the same
     int depth;  // For now, only cull if both boards are at the same depth. I think this can be optimized further.
