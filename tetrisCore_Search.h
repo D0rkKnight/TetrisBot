@@ -16,10 +16,6 @@ typedef struct {
     BoardObject *gridResult;
 } moveResult;
 
-// typedef struct {
-    
-// } 
-
 typedef struct {
     int *grid;
     int pieces; // Just current pieces, queue should be the same if the depth is the same
