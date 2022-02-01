@@ -1,6 +1,0 @@
-('c:\\users\\hanzen '
- 'shou\\appdata\\local\\programs\\python\\python310\\lib\\site-packages\\tetriscore-1.0-py3.10-win-amd64.egg',
- None,
- {'*.pyd', '*.py', '*.cp310-win_amd64.pyd', '*.pyc', 'EGG-INFO', '*.pyw'},
- 'DATA',
- [])

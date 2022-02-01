@@ -55,6 +55,8 @@ forcePiece = None # Hijacking purposes
 
 
 def init(cbI=None, cbL=None):
+    print("Initializing!")
+    
     tetrisCore.init()
     initSim()
 

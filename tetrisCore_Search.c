@@ -217,7 +217,7 @@ static int calcScore(BoardObject *board) {
     s += maxAlt * -1 / 20;
 
     s += testPits(board) * -1;
-    s += testHoles(board) * -10;
+    s += testHoles(board) * -5;
 
     return s;
 }
@@ -365,38 +365,41 @@ static void destroyCacheEntry(cacheEntry *ent) {
 }
 
 static void clearCache(cacheMap *cMap) {
-    // // Profile key distribution
-    // int deltas = 0;
-    // int empty = 0;
-    // int maxListLen = 0;
-    // int prev = 0;
-    // for (unsigned i=0; i<cMap->len; i++) {
-    //     int listDepth = 0;
-    //     cacheEntry *node = cMap->cells[i];
-    //     while(node != NULL) {
-    //         listDepth ++;
-    //         node = node->next;
-    //     }
+    // Profile key distribution
+    int deltas = 0;
+    int searchWeight = 0;
+    int empty = 0;
+    int maxListLen = 0;
+    int prev = 0;
+    for (unsigned i=0; i<cMap->len; i++) {
+        int listDepth = 0;
+        cacheEntry *node = cMap->cells[i];
+        while(node != NULL) {
+            listDepth ++;
+            node = node->next;
+        }
 
-    //     // Check max
-    //     if (listDepth > maxListLen) maxListLen = listDepth;
+        // Check max
+        if (listDepth > maxListLen) maxListLen = listDepth;
 
-    //     // Get abs difference
-    //     int diff = listDepth - prev;
-    //     if (diff < 0) diff *= -1;
+        // Get abs difference
+        int diff = listDepth - prev;
+        if (diff < 0) diff *= -1;
 
-    //     // Ignore empty stretches, those are bad
-    //     if (diff == 0 && listDepth == 0) empty ++;
+        // Ignore empty stretches, those are bad
+        if (listDepth == 0) empty ++;
 
-    //     deltas += diff;
-    //     prev = listDepth;
-    // }
+        searchWeight += listDepth * listDepth;
+        deltas += diff;
+        prev = listDepth;
+    }
+    int filledBuckets = cMap->len-empty;
+    float aveDelta = ((float) deltas) / filledBuckets;
+    float aveSearchWeight = ((float) searchWeight) / filledBuckets;
 
-    // float aveDelta = ((float) deltas) / (cMap->len-empty);
+    float fill = ((float) filledBuckets) / cMap->len;
 
-    // float fill = (((float) cMap->len) - empty) / cMap->len;
-
-    // printf("Max: %d, Ave. Delta: %f, Fill ratio: %f\n", maxListLen, aveDelta, fill);
+    printf("Max: %d, Ave. Delta: %f, Fill ratio: %f, Search Weight: %f\n", maxListLen, aveDelta, fill, aveSearchWeight);
 
     // Go through and clear everything
     for (unsigned i=0; i<cMap->len; i++) {

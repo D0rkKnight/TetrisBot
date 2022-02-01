@@ -87,10 +87,10 @@ def calculate():
     if keyboard.is_pressed('`'):
         started = True
 
-    # Screengrab for positioning
-    if keyboard.is_pressed('1'):
-        img = tetrisVision.pollScreen() 
-        img.show()
+    # # Screengrab for positioning
+    # if keyboard.is_pressed('1'):
+    #     img = tetrisVision.pollScreen() 
+    #     img.show()
 
     if not started:
         return
@@ -190,6 +190,7 @@ def calculate():
     #time.sleep(1)
 
     print(time.time()-start)
+    print() # Cap debug listing
 
     # if inputs.lineclears > 0:
     #     wait(lineclearLatency)

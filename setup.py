@@ -10,7 +10,9 @@ if def_args is not None:
        compile_args = compile_args = sysconfig.get_config_var('CFLAGS').split()
 
 if _DEBUG:
-       print("Debug mode that currently does nothing")
+       print("Compiling in debug mode")
+       # This somehow blocks compilation?
+       compile_args += ["/Z7"]
 else:
        print("Compiling in optimized mode")
        compile_args += ["/O2"]
