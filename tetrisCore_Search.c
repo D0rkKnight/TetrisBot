@@ -20,7 +20,7 @@ Board_search(BoardObject *self, PyObject *args) {
     }
 
     // Perform recursive search
-    moveset move = search(self, queue, qLen, hold1);
+    moveset move = search(self, queue, qLen, hold1, 0);
     PyObject *toHold = Py_False;
     if (move.hold) toHold = Py_True;
 
@@ -44,7 +44,7 @@ static void destroy(moveResult *res) {
 
 // Recursive function has a f1-f2-f1-f2 branch structure
 static moveset
-search(BoardObject *board, int *queue1, int levelsLeft, int hold1) {
+search(BoardObject *board, int *queue1, int levelsLeft, int hold1, int iScore) {
     // Generate an alt queue (with the hold)
     int qLen = levelsLeft;
     int *queue2 = PyMem_Malloc(sizeof(int) * qLen);
@@ -57,8 +57,8 @@ search(BoardObject *board, int *queue1, int levelsLeft, int hold1) {
     for (int x=-2; x<board->w; x++) {
         for (int r=0; r<4; r++) {
             // Pull score
-            moveset *m1 = searchSub(board, queue1, levelsLeft-1, hold1, x, r);
-            moveset *m2 = searchSub(board, queue2, levelsLeft-1, hold2, x, r);
+            moveset *m1 = searchSub(board, queue1, levelsLeft-1, hold1, x, r, iScore);
+            moveset *m2 = searchSub(board, queue2, levelsLeft-1, hold2, x, r, iScore);
             
             if (m2 != NULL) m2->hold = true; // Specifying that this option entails a hold
 
@@ -86,13 +86,14 @@ search(BoardObject *board, int *queue1, int levelsLeft, int hold1) {
     return bestMove;
 }
 
-static moveset *searchSub(BoardObject *board, int *queue, int levelsLeft, int hold, int x, int r) {
+static moveset *searchSub(BoardObject *board, int *queue, int levelsLeft, int hold, int x, int r, int iScore) {
     // Pull score
     moveResult *res = makePlay(board, x, r, queue[0]);
     if (res == NULL) return NULL;
 
     moveset *o = PyMem_Malloc(sizeof(moveset));
     *o = res->move;
+    o->inherScore += iScore; // Adopt parent iScore
 
     if (levelsLeft > 0) {
         // Shorten queue
@@ -100,12 +101,12 @@ static moveset *searchSub(BoardObject *board, int *queue, int levelsLeft, int ho
         for (int i=0; i<levelsLeft; i++) newQueue[i] = queue[i+1];
 
         // Adopt the scoring of all child outcomes
-        const moveset nextMove = search(res->gridResult, newQueue, levelsLeft, hold);
+        const moveset nextMove = search(res->gridResult, newQueue, levelsLeft, hold, o->inherScore);
 
         int futureScore = nextMove.score;
-        const int aggregateInherScore = nextMove.inherScore;
         res->move.score = futureScore;
-        res->move.inherScore += aggregateInherScore;
+
+        // Inherited score is returned by search as its true value
 
         PyMem_Free(newQueue); // Done w/ this
     }
