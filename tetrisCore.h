@@ -5,16 +5,24 @@
 
 typedef struct {
     PyObject_HEAD
-    int * grid;
+    unsigned * grid;
     int w;
     int h;
     int * ridge;
-    int * sat;
     int holes;
 } BoardObject;
 
+typedef struct {
+    int clears;
+    int *clearLocs;
+} lcReturn;
+
+typedef struct {
+    BoardObject *board;
+    lcReturn lc;
+} genBoardReturn;
+
 static PyTypeObject BoardType;
-static int testPeaks(BoardObject *b);
 static void installPieceBitstring(int p, int r, int *data);
 static void printBitstringAsString(size_t const size, void const * const ptr);
 static int getPieceBit(int p, int r, int x, int y);
@@ -24,6 +32,6 @@ static int getBitUnchecked(BoardObject *board, int x, int y);
 
 int Board_calcScore(BoardObject *board);
 
-BoardObject* Board_genHypoBoard(int p, int x, int r, BoardObject *b);
+genBoardReturn * Board_genHypoBoard(int p, int x, int r, BoardObject *b);
 
 #endif

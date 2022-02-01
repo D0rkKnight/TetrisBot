@@ -20,7 +20,7 @@ ARD = 0.17
 ARS = 0.05
 ARC = 0.1 # compensation
 
-searchDepth = 3
+searchDepth = 4
 
 firstBlock = True
 logData = False
@@ -34,6 +34,7 @@ MoveInput = collections.namedtuple('MoveInput', 'delta rot board score iScore li
 
 tetroMarginBuffer = []
 tetroRidgeBuffer = []
+
 
 def main():
     if source == INTERNAL_SIM:
@@ -151,7 +152,6 @@ def calculate():
 
     ridge = genRidge(grid)
     holes = findHoles(grid)
-    sat = findLineSaturation(grid)
 
     searchQueue = [tetrisSim.currentPiece]
     for i in range(searchDepth-1):
@@ -180,10 +180,6 @@ def calculate():
     # Write ridge into board internal ridge
     for i in range(grid.w):
         grid.setRidge(ridge[i]+1, i)
-
-    # Write saturation into board internal saturation
-    for i in range(grid.h):
-        grid.setSat(sat[i], i)
     
     # Write holes too
     grid.holes = holes

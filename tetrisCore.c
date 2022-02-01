@@ -161,7 +161,6 @@ Board_dealloc(BoardObject *self)
     // Grid is 1D array so direct deallocation is safe
     PyObject_Free(self->grid);
     PyObject_Free(self->ridge);
-    PyObject_Free(self->sat);
 
     Py_TYPE(self)->tp_free((PyObject *) self);
 }
@@ -182,7 +181,6 @@ Board_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         self->w = w;
         self->h = h;
 
-        self->sat = PyObject_Calloc(h, sizeof(int));
         self->ridge = PyObject_Calloc(w, sizeof(int));
 
         self->holes = 0;
@@ -284,8 +282,8 @@ static void setBit(BoardObject *board, int v, int x, int y) {
 
 static void setBitUnchecked(BoardObject *board, int v, int x, int y) {
     int row = board->grid[y];
-    if (v > 0) row = row | (1 << x);
-    else row = row & ~(1 << x);
+    if (v > 0) row = row | (1U << x);
+    else row = row & ~(1U << x);
 
     board->grid[y] = row;
     return;
@@ -348,33 +346,6 @@ Board_setRidge(BoardObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
-static PyObject *
-Board_getSat(BoardObject *self, PyObject *args) {
-    int i;
-
-    if (!PyArg_ParseTuple(args, "i", &i))
-        return NULL;
-    
-    if (!inBounds(self, 0, i))
-        return NULL;
-
-    return PyLong_FromLong(self->sat[i]);
-}
-
-static PyObject *
-Board_setSat(BoardObject *self, PyObject *args) {
-    int v, i;
-
-    if (!PyArg_ParseTuple(args, "ii", &v, &i))
-        return NULL;
-    
-    if (!inBounds(self, 0, 1))
-        return NULL;
-
-    self->sat[i] = v;
-    Py_RETURN_NONE;
-}
-
 // Perform a deep copy of the board
 static PyObject *
 Board_copy(BoardObject *self, PyObject *Py_UNUSED(ignored)) {
@@ -386,7 +357,6 @@ Board_copy(BoardObject *self, PyObject *Py_UNUSED(ignored)) {
 
     // Copy ridge and saturation
     memcpy(cp->ridge, self->ridge, self->w*sizeof(int));
-    memcpy(cp->sat, self->sat, self->h*sizeof(int));
 
     // Copy hole count
     cp->holes = self->holes;
@@ -394,7 +364,7 @@ Board_copy(BoardObject *self, PyObject *Py_UNUSED(ignored)) {
     return (PyObject *) cp;
 }
 
-static int lineclear(BoardObject *b) {
+static lcReturn lineclear(BoardObject *b) {
     // Indexed buffer to hold lines for swaps
     int clearAddIndex = 0;
     int clearPullIndex = 0;
@@ -403,8 +373,10 @@ static int lineclear(BoardObject *b) {
     int *lineArr = PyMem_Malloc(sizeof(int)*b->h);
     int lineArrSize = 0;
 
+    const unsigned fullRow = ~(~0U << 10);
+
     for (int r=0; r<b->h; r++) {
-        if (b->sat[r] >= b->w) {
+        if (b->grid[r] == fullRow) {
             clearAddIndex ++;
 
             lineArr[lineArrSize] = r;
@@ -441,15 +413,12 @@ static int lineclear(BoardObject *b) {
         }
     }
 
-    // Dealloc
-    PyMem_Free(lineArr); // Might be needed later
-
-
     // Return number of lineclears
-    return clearAddIndex;
+    lcReturn o = {.clears = clearAddIndex, .clearLocs = lineArr};
+    return o;
 }
 
-BoardObject* Board_genHypoBoard(int p, int x, int r, BoardObject *b) {
+genBoardReturn * Board_genHypoBoard(int p, int x, int r, BoardObject *b) {
     int pDims = pieceDims[p];
     
     // Perform the ridge march
@@ -481,7 +450,6 @@ BoardObject* Board_genHypoBoard(int p, int x, int r, BoardObject *b) {
 
             if (cell > 0) {
                 setBitUnchecked(hb, cell, x+lx, y+ly); // Unchecked for sp e e d.
-                hb->sat[y+ly] ++;
             }
         }
     }
@@ -502,49 +470,13 @@ BoardObject* Board_genHypoBoard(int p, int x, int r, BoardObject *b) {
         hb->ridge[col] = y + rDelta;
     }
 
-    int clears = lineclear(hb);
+    lcReturn lc = lineclear(hb);
 
-    // Todo: read line clears for hole resolution
+    genBoardReturn *o = PyMem_Malloc(sizeof(genBoardReturn));
+    o->board = hb;
+    o->lc = lc;
 
-    return hb;
-}
-
-static int testPeaks(BoardObject *b) {
-    int *r = b->ridge;
-    int maxAlt = 0;
-    for (int i=0; i<b->w; i++) {
-        if (r[i] > maxAlt) maxAlt = r[i];
-    }
-
-    return maxAlt;
-}
-
-static int testPits(BoardObject *b) {
-    int o = 0;
-
-    for(int i=1; i<b->w; i++){
-        int prevAlt = b->ridge[i-1];
-        int nextAlt = b->ridge[i];
-
-        int diff = nextAlt-prevAlt;
-        if (diff<0) diff*=-1;
-
-        o += diff;
-    }
     return o;
-}
-
-static int testHoles(BoardObject *b) {
-    return b->holes;
-}
-
-int Board_calcScore(BoardObject *board) {
-    int s = 0;
-    s += testPeaks(board) * -1;
-    s += testPits(board) * -1;
-    s += testHoles(board) * -10;
-
-    return s;
 }
 
 static PyObject *
@@ -565,10 +497,6 @@ static PyMethodDef Board_methods[] = {
     {"getRidge", (PyCFunction) Board_getRidge, METH_VARARGS, ""
     },
     {"setRidge", (PyCFunction) Board_setRidge, METH_VARARGS, ""
-    },
-    {"getSat", (PyCFunction) Board_getSat, METH_VARARGS, ""
-    },
-    {"setSat", (PyCFunction) Board_setSat, METH_VARARGS, ""
     },
     {"search", (PyCFunction) Board_searchWrapper, METH_VARARGS, ""
     },

@@ -366,6 +366,9 @@ def lineClear(grid, sat=None):
             for x in range(grid.w):
                 postClear.set(grid.get(x, y), x, y - linesCleared)
 
+    if (linesCleared == 4):
+        print("Tetris!")
+
     return {'board' : postClear, 'clears' : linesCleared, 'lines' : lines}
 
 if __name__ == '__main__':
