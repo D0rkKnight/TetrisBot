@@ -2,6 +2,16 @@
 #include <stdbool.h>
 #include "tetrisCore_Search.h"
 
+
+cacheMap *cMap = NULL;
+int searchCounter = 0;
+
+void Search_init() {
+    cMap = genCacheMap(500007);
+    //cMap = genCacheMap(12899);
+    //cMap = genCacheMap(17);
+}
+
 PyObject *
 Board_search(BoardObject *self, PyObject *args) {
     PyObject *queueObj;
@@ -20,7 +30,10 @@ Board_search(BoardObject *self, PyObject *args) {
     }
 
     // Perform recursive search
+    searchCounter = 0;
     moveset move = search(self, queue, qLen, hold1, 0);
+    printf("Search complexity: %d\n", searchCounter);
+
     PyObject *toHold = Py_False;
     if (move.hold) toHold = Py_True;
 
@@ -31,6 +44,8 @@ Board_search(BoardObject *self, PyObject *args) {
     PyTuple_SetItem(o, 2, toHold);
 
     PyMem_Free(queue);
+    clearCache(cMap); // Very important to do this
+
     return o;
 }
 
@@ -95,10 +110,27 @@ static moveset *searchSub(BoardObject *board, int *queue, int levelsLeft, int ho
     *o = res->move;
     o->inherScore += iScore; // Adopt parent iScore
 
+    searchCounter ++;
+
     if (levelsLeft > 0) {
         // Shorten queue
         int *newQueue = PyMem_Malloc(sizeof(int)*levelsLeft);
         for (int i=0; i<levelsLeft; i++) newQueue[i] = queue[i+1];
+
+        // Test hashing function
+        unsigned bag = tetrisCore_getBag();
+        //printf("Data- P1: %d, Hold: %d, levels Left: %d, bag: %u, iScore: %d\n", newQueue[0], hold, levelsLeft, bag, o->inherScore);
+
+        int conflict = cacheGameState(res->gridResult, newQueue[0], hold, levelsLeft, bag, o->inherScore, cMap);
+
+        if (conflict) {
+            // Cull branch!
+            destroy(res);
+            PyMem_Free(o);
+            PyMem_Free(newQueue);
+
+            return NULL;
+        }
 
         // Adopt the scoring of all child outcomes
         const moveset nextMove = search(res->gridResult, newQueue, levelsLeft, hold, o->inherScore);
@@ -119,7 +151,6 @@ static moveResult *makePlay(BoardObject *board, int x, int r, int p) {
     // Pull score
     genBoardReturn *ret = Board_genHypoBoard(p, x, r, board);
 
-    // BoardObject *results = (BoardObject *) Board_copy(board, NULL);
     if (ret == NULL) return NULL;
 
     // Shield data extraction with null check
@@ -201,3 +232,121 @@ static int calcInherScore(BoardObject *board, lcReturn lc) {
 
     return s;
 }
+
+static int hashGameState(cacheEntry ent, cacheMap *map) {
+    int hash = 1;
+    for (int i=0; i<ent.h; i++) {
+        hash *= ent.grid[i]+1;
+        hash %= map->len;
+    }
+
+        
+    if (hash == 0) printf("uh oh");
+
+    hash *= ent.pieces;
+    hash *= ent.levelsLeft;
+    hash *= ent.bag+1;
+    hash *= ent.inherScore+1;
+
+
+    hash %= map->len;
+
+    return hash;
+}
+
+// Return if two entries are the same
+static int checkBoardStateSimilarity(cacheEntry *new, cacheEntry *old) {
+    if (new->pieces != old->pieces) return false;
+    if (new->h != old->h) return false;
+
+    // Check board
+    for (int i=0; i<new->h; i++) {
+        if (new->grid[i] != old->grid[i]) return false;
+    }
+
+    if (new->levelsLeft > old->levelsLeft) return false;
+    if (new->bag != old->bag) return false;
+    if (new->inherScore > old->inherScore) return false;
+
+    // Means the two board collide
+    return true;
+}
+
+static int cacheGameState(BoardObject *board, int piece1, int piece2, int levelsLeft, unsigned bag, int inherScore, cacheMap *map) {
+    // Generate cache entry
+    unsigned pBit = (1U << piece1) | (1U << piece2); // Compresses hold swaps
+
+    int *entGrid = PyMem_Malloc(sizeof(int) * board->h); // Copy grid, since board grid gets eventually released
+    memcpy(entGrid, board->grid, sizeof(int) * board->h);
+
+    cacheEntry ent = {.grid = entGrid, .h = board->h, .pieces=pBit, .levelsLeft=levelsLeft, .bag=bag, .inherScore=inherScore, .next=NULL};
+    cacheEntry *entPtr = PyMem_Malloc(sizeof(cacheEntry));
+    *entPtr = ent;
+
+    int hash = hashGameState(ent, map);
+
+    // Try to install hash
+    if (map->cells[hash] == NULL) {
+        map->cells[hash] = entPtr;
+    }
+    else {
+        cacheEntry *curr = map->cells[hash];
+
+        if (checkBoardStateSimilarity(entPtr, curr)) {
+                destroyCacheEntry(entPtr); // Free entry if unused
+                return true; // Check for conflict w/ first element
+        }
+
+        while (curr->next != NULL) {
+
+            // Check if there is a conflict
+            if (checkBoardStateSimilarity(entPtr, curr)) {
+                destroyCacheEntry(entPtr); // Free entry if unused
+                return true; // Found a conflict
+            }
+
+            curr = curr->next;
+        }
+
+        // No conflict, PREPEND to linked list
+        // Prepending makes it more easily discoverable by adjacent searches
+        cacheEntry *first = map->cells[hash];
+        entPtr->next = first;
+        map->cells[hash] = entPtr;
+
+        // curr->next = entPtr;
+    }
+
+    return false;
+}
+
+static cacheMap *genCacheMap(unsigned len) {
+    cacheMap *m = PyMem_Malloc(sizeof(cacheMap));
+    m->cells = PyMem_Malloc(sizeof(cacheEntry **) * len);
+    m->len = len;
+
+    // Set every cache entry to null
+    for (unsigned i=0; i<len; i++)
+        m->cells[i] = NULL;
+    
+    return m;
+}
+
+static void destroyCacheEntry(cacheEntry *ent) {
+    if (ent == NULL) return;
+    destroyCacheEntry((cacheEntry *) ent->next);
+
+    PyMem_Free(ent->grid);
+    PyMem_Free(ent);
+}
+
+static void clearCache(cacheMap *cMap) {
+    // Go through and clear everything
+    for (unsigned i=0; i<cMap->len; i++) {
+        // Dealloc linked lists
+        cacheEntry *ent = cMap->cells[i];
+        destroyCacheEntry(ent);
+        cMap->cells[i] = NULL;
+    }
+}
+

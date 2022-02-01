@@ -17,6 +17,7 @@ int *pieceMarginData[7][4];
 int *pieceFillData[7][4];
 enum piece{I, J, L, O, S, T, Z};
 int pieceDims[7] = {4, 3, 3, 2, 3, 3, 3};
+unsigned bag = 0U;
 
 int pieceBitstrings[7][4];
 
@@ -88,7 +89,7 @@ static void installPieceBitstring(int p, int r, int *data) {
 }
 
 // Assumes little endian, from https://stackoverflow.com/questions/111928/is-there-a-printf-converter-to-print-in-binary-format
-static void printBitstringAsString(size_t const size, void const * const ptr) {
+void printBitstringAsString(size_t const size, void const * const ptr) {
     unsigned char *b = (unsigned char *) ptr;
     unsigned char byte;
     int i, j;
@@ -136,6 +137,7 @@ tetrisCore_init(PyObject *self, PyObject *args) {
             installPieceBitstring(a, r, pieceData[a][r]);
         }
     }
+    Search_init();
 
     Py_RETURN_NONE;
 }
@@ -152,6 +154,27 @@ tetrisCore_getPieceDim(PyObject *self, PyObject *args) {
         return NULL;
 
     return PyLong_FromLong(pieceDims[p]);
+}
+
+PyObject *
+tetrisCore_setBag(PyObject *self, PyObject *args) {
+    PyObject *arr;
+
+    if (!PyArg_ParseTuple(args, "O", &arr))
+        return NULL;
+    
+    int len = (int) PyList_Size(arr);
+
+    bag = 0;
+    for (int i=0; i<len; i++) {
+        bag |= 1U << PyLong_AsLong(PyList_GetItem(arr, i));
+    }
+
+    Py_RETURN_NONE;
+}
+
+unsigned tetrisCore_getBag() {
+    return bag;
 }
 
 // BOARD --------------------------------------
@@ -521,6 +544,7 @@ static PyTypeObject BoardType = {
 static PyMethodDef coreMethods[] = {
     {"init", tetrisCore_init, METH_VARARGS, "Initializes the Tetris Core."},
     {"getPieceDim", tetrisCore_getPieceDim, METH_VARARGS, "Retrieves dimensions for a tetromino."},
+    {"setBag", tetrisCore_setBag, METH_VARARGS, "Sets bag state."},
     {NULL, NULL, 0, NULL}
 };
 

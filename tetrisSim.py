@@ -308,6 +308,8 @@ def drawPiece():
     if forcePiece is not None:
         return forcePiece
 
+    tetrisCore.setBag(bag)
+    
     return o
 
 def regenerateQueue():
