@@ -7,15 +7,16 @@ _DEBUG = True
 compile_args = []
 def_args = sysconfig.get_config_var('CFLAGS')
 if def_args is not None:
-       compile_args = compile_args = sysconfig.get_config_var('CFLAGS').split()
+       compile_args = sysconfig.get_config_var('CFLAGS').split()
 
 if _DEBUG:
        print("Compiling in debug mode")
        # This somehow blocks compilation?
-       compile_args += ["/Z7"]
+       # compile_args += ["/Z7"]
+       # compile_args += []
 else:
-       print("Compiling in optimized mode")
-       compile_args += ["/O2"]
+       print("Compiling in optimized mode (DOESN'T WORK RIGHT NOW)")
+       # compile_args += ["/O2"]
 
 print("Extra compile args are: "+str(compile_args))
 
