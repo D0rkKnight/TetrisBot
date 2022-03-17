@@ -309,6 +309,7 @@ static void setBitUnchecked(BoardObject *board, int v, int x, int y) {
     else row = row & ~(1U << x);
 
     board->grid[y] = row;
+    printf("Wub a lub dub dub");
     return;
 }
 

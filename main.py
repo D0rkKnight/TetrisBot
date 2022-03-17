@@ -20,7 +20,7 @@ ARD = 0.17
 ARS = 0.05
 ARC = 0.1 # compensation
 
-searchDepth = 4
+searchDepth = 3
 
 firstBlock = True
 logData = False
