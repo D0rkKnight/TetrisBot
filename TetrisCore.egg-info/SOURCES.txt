@@ -1,4 +1,3 @@
-setup.cfg
 setup.py
 tetrisCore.c
 tetrisCore_Search.c

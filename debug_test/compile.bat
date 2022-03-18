@@ -1,1 +1,0 @@
-gcc test.c -g -o run.exe

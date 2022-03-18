@@ -46,9 +46,6 @@ static void installPiece(int p, int r, int *data) {
 
     pieceData[p][r] = mem;
 
-    // A small change
-    // printf("A small change\n");
-
     return;
 }
 
