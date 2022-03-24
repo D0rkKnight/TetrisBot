@@ -559,6 +559,8 @@ static struct PyModuleDef coreModule = {
 PyMODINIT_FUNC
 PyInit_tetrisCore(void) 
 {
+    printf("Does this even work?\n");
+
     PyObject *m;
     if (PyType_Ready(&BoardType) < 0)
         return NULL;

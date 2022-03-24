@@ -1,6 +1,8 @@
 import time
+import tracemalloc
 import tetrisCore
 
+tracemalloc.start(25)
 tetrisCore.init()
 
 board = tetrisCore.Board()
@@ -20,6 +22,15 @@ board = tetrisCore.Board()
 # print(board2)
 
 tetrisCore.setBag([0, 5, 6])
-board.search([1, 2, 3], 4)
+board.search([1, 2, 3], 3)
 
 print("All instructions executed!")
+
+snapshot = tracemalloc.take_snapshot()
+top_stats = snapshot.statistics('lineno')
+
+print("\n[ Top 10 ]")
+for stat in top_stats[:10]:
+    print(stat)
+
+print("\nProgram finished")

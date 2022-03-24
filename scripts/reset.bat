@@ -1,2 +1,2 @@
-scripts/cleanup.bat
-scripts/compile.bat
+call scripts/cleanup.bat
+call scripts/compile.bat
