@@ -6,3 +6,4 @@ build/
 vc140.pdb
 
 *.pyc
+env/
