@@ -3,11 +3,8 @@
 .vscode/c_cpp_properties.json
 __pycache__/tetrisSim.cpython-310.pyc
 __pycache__/tetrisVision.cpython-310.pyc
-build/lib.win-amd64-3.10/tetrisCore.cp310-win_amd64.pyd
-build/temp.win-amd64-3.10/Release/tetrisCore.cp310-win_amd64.exp
-build/temp.win-amd64-3.10/Release/tetrisCore.cp310-win_amd64.lib
-build/temp.win-amd64-3.10/Release/tetrisCore.obj
 dist/TetrisCore-1.0-py3.10-win-amd64.egg
-TetrisCore.egg-info/dependency_links.txt
-TetrisCore.egg-info/SOURCES.txt
-TetrisCore.egg-info/top_level.txt
+TetrisCore.egg-info/
+build/
+vc140.pdb
+
