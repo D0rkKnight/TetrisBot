@@ -1,9 +1,8 @@
-
 .vscode/c_cpp_properties.json
 __pycache__/
 dist/TetrisCore-1.0-py3.10-win-amd64.egg
 TetrisCore.egg-info/
 build/
-env/Lib/
 vc140.pdb
 
+*.pyc
