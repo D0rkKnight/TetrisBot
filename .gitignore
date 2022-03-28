@@ -6,5 +6,6 @@ __pycache__/tetrisVision.cpython-310.pyc
 dist/TetrisCore-1.0-py3.10-win-amd64.egg
 TetrisCore.egg-info/
 build/
+env/Lib/
 vc140.pdb
 
