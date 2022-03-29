@@ -8,3 +8,4 @@ vc140.pdb
 *.pyc
 env/
 setup.cfg
+tetrisCore.cpython-38d-x86_64-linux-gnu.so
