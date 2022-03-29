@@ -2,5 +2,4 @@ numpy
 pygame
 pynput
 pillow
-pywin32
 keyboard

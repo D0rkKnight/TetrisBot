@@ -9,7 +9,6 @@
 
 #define _CRTDBG_MAP_ALLOC
 #include <stdlib.h>
-#include <crtdbg.h>
 
 // PIECE GENERATION ---------------------------
 int *pieceData[7][4];
@@ -128,7 +127,7 @@ tetrisCore_init(PyObject *self, PyObject *args) {
     int z[] = {0, 0, 1,
                    0, 1, 1,
                    0, 1, 0};
-    
+
     int *tp[7] = {i, j, l, o, s, t, z};
     for (int a=0; a<7; a++) {
         for (int r=0; r<4; r++) {
@@ -263,7 +262,7 @@ boardToString(BoardObject *self) {
 static void
 printBoard(BoardObject *b) {
     char *str = boardToString(b);
-    printf(str);
+    printf("%s", str);
     PyMem_Free(str);
 }
 

@@ -1,2 +1,2 @@
-source scripts/cleanup.sh
-source scripts/debug.sh
+. scripts/cleanup.sh
+. scripts/debug.sh
