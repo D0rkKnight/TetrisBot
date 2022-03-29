@@ -14,6 +14,8 @@
 int *pieceData[7][4];
 int *pieceMarginData[7][4];
 int *pieceFillData[7][4];
+int *pieceLeftMargin[7][4];
+int *pieceLeftFill[7][4];
 enum piece{I, J, L, O, S, T, Z};
 int pieceDims[7] = {4, 3, 3, 2, 3, 3, 3};
 unsigned bag = 0U;
@@ -74,6 +76,35 @@ static void calcPieceMargins(int p, int r, int *data) {
 
     pieceMarginData[p][r] = bMem;
     pieceFillData[p][r] = tMem;
+
+    // L/R Margins
+    int *lMem = PyMem_Malloc(dim*sizeof(int));
+    int *rMem = PyMem_Malloc(dim*sizeof(int));
+    
+    //printf("rot: %d\n", r);
+    for (int y=0; y<dim; y++) {
+        // March upwards until a cell is discovered
+        int leftDetected = 0;
+        int left = -1;
+        int lastCell = -2;
+        for (int x = 0; x < dim; x++) {
+            if (data[x * dim + y] > 0) {
+                if (!leftDetected)
+                    left = x;
+                leftDetected = 1;
+
+                lastCell = x;
+            }
+        }
+
+        lMem[y] = left;
+        rMem[y] = lastCell+1;
+        //printf("y: %d left: %d right: %d\n", y, lMem[y], rMem[y]);
+    }
+
+    pieceLeftMargin[p][r] = lMem;
+    pieceLeftFill[p][r] = rMem;
+
 }
 
 static void installPieceBitstring(int p, int r, int *data) {
@@ -259,7 +290,7 @@ boardToString(BoardObject *self) {
     return out;
 }
 
-static void
+void
 printBoard(BoardObject *b) {
     char *str = boardToString(b);
     printf("%s", str);
@@ -280,7 +311,6 @@ Board_asString(BoardObject *self, PyObject *Py_UNUSED(ignored))
 
 static int inBounds(BoardObject *board, int x, int y) {
     if (x < 0 || x >= board->w || y < 0 || y >= board->h) {
-        printf("Index out of bounds: %d, %d\n", x, y);
         return 0;
     }
 
@@ -440,7 +470,7 @@ static lcReturn lineclear(BoardObject *b) {
     return o;
 }
 
-genBoardReturn * Board_genHypoBoard(int p, int x, int r, BoardObject *b) {
+genBoardReturn * Board_genHypoBoard(int p, int dropX, int r, int slide, BoardObject *b) {
     int pDims = pieceDims[p];
     
     // Perform the ridge march
@@ -448,7 +478,7 @@ genBoardReturn * Board_genHypoBoard(int p, int x, int r, BoardObject *b) {
     int conflict = 0;
 
     for(int i=0; i<pDims; i++) {
-        int col = x+i;
+        int col = dropX+i;
         int bMargin = pieceMarginData[p][r][i];
         if (bMargin < 0) continue;
 
@@ -463,6 +493,14 @@ genBoardReturn * Board_genHypoBoard(int p, int x, int r, BoardObject *b) {
 
     if (conflict || y > b->h - pDims) return NULL;
 
+    // Now do some sliding
+    // TODO: Slide branching should really be here, not earlier. but whatever
+    // Like I should be able to avoid the ridge march
+    int slideable = slideBoard(b, p, r, dropX, y, slide);
+    if (!slideable) return NULL;
+
+    // TODO: the piece needs to drop after sliding
+
     // Create a hypothetical board
     BoardObject *hb = (BoardObject *) Board_copy(b, NULL);
 
@@ -471,25 +509,41 @@ genBoardReturn * Board_genHypoBoard(int p, int x, int r, BoardObject *b) {
             int cell = getPieceBit(p, r, lx, ly);
 
             if (cell > 0) {
-                setBitUnchecked(hb, cell, x+lx, y+ly); // Unchecked for sp e e d.
+                int bx = dropX+lx+slide;
+                int by = y+ly;
+                setBitUnchecked(hb, cell, bx, by); // Unchecked for sp e e d.
             }
         }
     }
+
+    int realX = dropX + slide;
 
     // Update hypo board ridge
     for(int i=0; i<pDims; i++) {
         int rDelta = pieceFillData[p][r][i];
         if (rDelta < 0) continue;
 
-        int col = x + i;
-
-        // Calculate holes
+        int col = realX + i;
         int margin = pieceMarginData[p][r][i];
-        int holesMade = y - hb->ridge[col] + margin;
-        hb->holes+=holesMade;
+        int realAltitude = y + margin;
 
-        // Update ridge altitude
-        hb->ridge[col] = y + rDelta;
+        // Stacked relationship
+        if (realAltitude >= hb->ridge[col]) {
+            // Calculate holes
+            int holesMade = y - hb->ridge[col] + margin;
+            hb->holes+=holesMade;
+
+            // Update ridge altitude
+            hb->ridge[col] = y + rDelta;
+        }
+
+        // Slid relationship
+        else {
+            // Holes are filled as they are slid into
+            hb->holes -= rDelta-margin;
+
+            // Ridge does not change, so we ignore it
+        }
     }
 
     lcReturn lc = lineclear(hb);
@@ -499,6 +553,33 @@ genBoardReturn * Board_genHypoBoard(int p, int x, int r, BoardObject *b) {
     o->lc = lc;
 
     return o;
+}
+
+// Does not edit the board
+// Returns whether the slide is even possible
+int slideBoard(BoardObject *board, int p, int r, int x, int y, int slide) {
+    if (slide == 0) return true;
+
+    // Leftward slides only for now
+    
+    // Check if there's actually space on the left
+    int *leftMargins = pieceLeftMargin[p][r];
+    int *leftFills = pieceLeftFill[p][r];
+    int dims = pieceDims[p];
+
+    int space = true;
+    for (int y=0; y<dims; y++) {
+        int edge = -1; // The edge block
+        if (slide < 0) edge = leftMargins[y];
+        if (slide > 0) edge = leftFills[y]-1;
+
+        if (edge < 0) continue; // Short circuit
+
+        int inspect = edge+x+slide;
+        if (getBit(board, inspect, y) != 0) space = false;
+    }
+
+    return space; // Whether there is space
 }
 
 static PyObject *
@@ -558,8 +639,6 @@ static struct PyModuleDef coreModule = {
 PyMODINIT_FUNC
 PyInit_tetrisCore(void) 
 {
-    printf("Does this even work?\n");
-
     PyObject *m;
     if (PyType_Ready(&BoardType) < 0)
         return NULL;

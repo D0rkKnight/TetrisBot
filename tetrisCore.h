@@ -8,7 +8,7 @@ typedef struct {
     unsigned * grid;
     int w;
     int h;
-    int * ridge;
+    int * ridge; // Counts from 0
     int holes;
 } BoardObject;
 
@@ -32,7 +32,9 @@ static int getBitUnchecked(BoardObject *board, int x, int y);
 
 int Board_calcScore(BoardObject *board);
 
-genBoardReturn * Board_genHypoBoard(int p, int x, int r, BoardObject *b);
+genBoardReturn * Board_genHypoBoard(int p, int x, int r, int slide, BoardObject *b);
+int slideBoard(BoardObject *hb, int p, int r, int x, int y, int slide);
+void printBoard(BoardObject *b);
 
 unsigned tetrisCore_getBag();
 

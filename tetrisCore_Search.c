@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdbool.h>
+#include "tetrisCore.h"
 #include "tetrisCore_Search.h"
 
 
@@ -32,16 +33,20 @@ Board_search(BoardObject *self, PyObject *args) {
     // Perform recursive search
     searchCounter = 0;
     moveset move = search(self, queue, qLen, hold1, 0);
+
     printf("Search complexity: %d\n", searchCounter);
 
     PyObject *toHold = Py_False;
     if (move.hold) toHold = Py_True;
 
     // Format output
-    PyObject *o = PyTuple_New(3);
+    PyObject *o = PyTuple_New(4);
     PyTuple_SetItem(o, 0, PyLong_FromLong(move.targetX));
     PyTuple_SetItem(o, 1, PyLong_FromLong(move.targetRot));
     PyTuple_SetItem(o, 2, toHold);
+    PyTuple_SetItem(o, 3, PyLong_FromLong(move.slide));
+
+    printf("Score: %d\n", move.score);
 
     PyMem_Free(queue);
     clearCache(cMap); // Very important to do this
@@ -71,27 +76,31 @@ search(BoardObject *board, int *queue1, int levelsLeft, int hold1, int iScore) {
     moveset bestMove = {.score=INT_MIN};
     for (int x=-2; x<board->w; x++) {
         for (int r=0; r<4; r++) {
-            // Pull score
-            moveset *m1 = searchSub(board, queue1, levelsLeft-1, hold1, x, r, iScore);
-            moveset *m2 = searchSub(board, queue2, levelsLeft-1, hold2, x, r, iScore);
-            
-            if (m2 != NULL) m2->hold = true; // Specifying that this option entails a hold
 
-            if (m1 == NULL && m2 == NULL) continue;
+            // NOTE: LEFTWARD SLIDING ONLY FOR NOW
+            for (int slide = -1; slide <= 1; slide ++) {
+                // Pull score
+                moveset *m1 = searchSub(board, queue1, levelsLeft-1, hold1, x, r, slide, iScore);
+                moveset *m2 = searchSub(board, queue2, levelsLeft-1, hold2, x, r, slide, iScore);
+                
+                if (m2 != NULL) m2->hold = true; // Specifying that this option entails a hold
 
-            // Selecting the better choice and deallocating the other
-            moveset *choice = m1;
-            if (m1 == NULL || (m2 != NULL && (m2->score+m2->inherScore) > (m1->score+m1->inherScore))) {
-                choice=m2;
+                if (m1 == NULL && m2 == NULL) continue;
+
+                // Selecting the better choice and deallocating the other
+                moveset *choice = m1;
+                if (m1 == NULL || (m2 != NULL && (m2->score+m2->inherScore) > (m1->score+m1->inherScore))) {
+                    choice=m2;
+                }
+
+                // Compare choice against the current best choice
+                if ((choice->score+choice->inherScore) > (bestMove.score+bestMove.inherScore)) {
+                    bestMove = *choice;
+                }
+
+                PyMem_Free(m1);
+                PyMem_Free(m2);
             }
-
-            // Compare choice against the current best choice
-            if ((choice->score+choice->inherScore) > (bestMove.score+bestMove.inherScore)) {
-                bestMove = *choice;
-            }
-
-            PyMem_Free(m1);
-            PyMem_Free(m2);
         }
     }
 
@@ -101,9 +110,9 @@ search(BoardObject *board, int *queue1, int levelsLeft, int hold1, int iScore) {
     return bestMove;
 }
 
-static moveset *searchSub(BoardObject *board, int *queue, int levelsLeft, int hold, int x, int r, int iScore) {
+static moveset *searchSub(BoardObject *board, int *queue, int levelsLeft, int hold, int x, int r, int slide, int iScore) {
     // Pull score
-    moveResult *res = makePlay(board, x, r, queue[0]);
+    moveResult *res = makePlay(board, x, r, slide, queue[0]);
     if (res == NULL) return NULL;
 
     moveset *o = PyMem_Malloc(sizeof(moveset));
@@ -144,9 +153,9 @@ static moveset *searchSub(BoardObject *board, int *queue, int levelsLeft, int ho
     return o;
 }
 
-static moveResult *makePlay(BoardObject *board, int x, int r, int p) {
+static moveResult *makePlay(BoardObject *board, int x, int r, int slide, int p) {
     // Pull score
-    genBoardReturn *ret = Board_genHypoBoard(p, x, r, board);
+    genBoardReturn *ret = Board_genHypoBoard(p, x, r, slide, board);
 
     if (ret == NULL) return NULL;
 
@@ -158,7 +167,7 @@ static moveResult *makePlay(BoardObject *board, int x, int r, int p) {
     int stepInherScoreDelta = calcInherScore(results, lc);
 
     moveResult *o = PyMem_Malloc(sizeof(moveResult));
-    moveset move = {.score = score, .inherScore = stepInherScoreDelta, .targetRot = r, .targetX = x};
+    moveset move = {.score = score, .inherScore = stepInherScoreDelta, .targetRot = r, .targetX = x, .slide = slide};
     o->move = move;
     o->gridResult = results;
 
@@ -166,7 +175,25 @@ static moveResult *makePlay(BoardObject *board, int x, int r, int p) {
     PyMem_Free(lc.clearLocs);
     PyMem_Free(ret);
 
+    printf("eh?");
+    if (slide != 0) dumpState(o);
+
     return o;
+}
+
+void dumpState(moveResult *res) {
+    printf("----------------------------------------------------------\n");
+    printBoard(res->gridResult);
+    printf("Ridge\n");
+    for(int x=0; x<res->gridResult->w; x++) printf("%d", res->gridResult->ridge[x]);
+    printf("\nHoles: %d\n", res->gridResult->holes);
+
+    moveset move = res->move;
+    printf("Target X: %d\nTarget Rot: %d\nScore: %d\nInher. Score: %d\nHold: %d\n, Slide:%d\n", 
+        move.targetX, move.targetX, move.score, move.inherScore, move.hold, move.slide);
+    
+    // Testing
+    if (res->gridResult->holes < 0) exit(1);
 }
 
 static int testPeaks(BoardObject *b) {
@@ -217,7 +244,9 @@ static int calcScore(BoardObject *board) {
     s += maxAlt * -1 / 20;
 
     s += testPits(board) * -1;
-    s += testHoles(board) * -5;
+
+    //if (board->holes < 0) printf("Wrong");
+    s += testHoles(board) * -5000;
 
     return s;
 }
@@ -225,7 +254,7 @@ static int calcScore(BoardObject *board) {
 static int calcInherScore(BoardObject *board, lcReturn lc) {
     int s = 0;
     s += tetrisFinder(lc) * 50;
-    s += stackBuilder(lc) * -10;
+    s += stackBuilder(lc) * -5;
 
     return s;
 }
@@ -292,22 +321,6 @@ static int cacheGameState(BoardObject *board, int piece1, int piece2, int levels
     *entPtr = ent;
 
     int hash = hashGameState(ent, map);
-
-    // Try alternate no-list system (ITS SLOWER)
-    // if (map->cells[hash] == NULL) {
-    //     map->cells[hash] = entPtr;
-    // } else {
-    //     cacheEntry *curr = map->cells[hash];
-    //     if (checkBoardStateSimilarity(entPtr, curr)) {
-    //         destroyCacheEntry(entPtr); // Free entry if unused
-    //         return true; // Check for conflict w/ first element
-    //     }
-
-    //     destroyCacheEntry(curr);
-    //     map->cells[hash] = entPtr;
-    // }
-
-    // return false;
 
     // Try to install hash
     if (map->cells[hash] == NULL) {
@@ -393,13 +406,13 @@ static void clearCache(cacheMap *cMap) {
         deltas += diff;
         prev = listDepth;
     }
-    int filledBuckets = cMap->len-empty;
-    float aveDelta = ((float) deltas) / filledBuckets;
-    float aveSearchWeight = ((float) searchWeight) / filledBuckets;
+    // int filledBuckets = cMap->len-empty;
+    // float aveDelta = ((float) deltas) / filledBuckets;
+    // float aveSearchWeight = ((float) searchWeight) / filledBuckets;
 
-    float fill = ((float) filledBuckets) / cMap->len;
+    // float fill = ((float) filledBuckets) / cMap->len;
 
-    printf("Max: %d, Ave. Delta: %f, Fill ratio: %f, Search Weight: %f\n", maxListLen, aveDelta, fill, aveSearchWeight);
+    // printf("Max: %d, Ave. Delta: %f, Fill ratio: %f, Search Weight: %f\n", maxListLen, aveDelta, fill, aveSearchWeight);
 
     // Go through and clear everything
     for (unsigned i=0; i<cMap->len; i++) {

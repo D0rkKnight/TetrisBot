@@ -9,6 +9,8 @@ import time
 import tetrisCore
 
 grid = tetrisCore.Board()
+colors = np.empty(shape=(grid.w, grid.h), dtype=object)
+pieceCols = [(100, 100, 255), (0, 0, 255), (255, 100, 100), (255, 255, 0), (0, 255, 0), (255, 0, 255), (255, 0, 0)]
 
 I = 0; J = 1; L = 2; O = 3; S = 4; T = 5; Z = 6
 
@@ -48,6 +50,7 @@ hold = ''
 nextDelta = [0, 0]
 
 hardDropQueued = False
+softDropQueued = False
 lockQueued = False
 holdQueued = False
 
@@ -104,11 +107,10 @@ def init(cbI=None, cbL=None):
                 py = y - piecePos[1]
 
                 if px >= 0 and px < piece.shape[0] and py >= 0 and py < piece.shape[1] and piece[px, py] > 0:
-                    color = (255, 255, 255)
-                
+                    color = pieceCols[currentPiece]
 
                 if cell > 0:
-                    color = (255, 255, 255)
+                    color = colors[x, y]
 
                 pygame.draw.rect(screen, color, (sx, sy, squareSize[0], squareSize[1]))
 
@@ -127,7 +129,7 @@ def init(cbI=None, cbL=None):
                         sx = qpAnch[0] + x * squareSize[0]
                         sy = qpAnch[1] + y * squareSize[1]
 
-                        pygame.draw.rect(screen, (255, 255, 255), (sx, sy, squareSize[0], squareSize[1]))
+                        pygame.draw.rect(screen, pieceCols[queue[i]], (sx, sy, squareSize[0], squareSize[1]))
 
         # Draw hold
         if hold != '':
@@ -141,7 +143,7 @@ def init(cbI=None, cbL=None):
                         sx = holdAnch[0] + x * squareSize[0]
                         sy = holdAnch[1] + y * squareSize[1]
 
-                        pygame.draw.rect(screen, (255, 255, 255), (sx, sy, squareSize[0], squareSize[1]))
+                        pygame.draw.rect(screen, pieceCols[hold], (sx, sy, squareSize[0], squareSize[1]))
 
         pygame.display.update()
 
@@ -169,16 +171,26 @@ def initSim():
         
         rotVars.append(o)
     
+    # Initialize color mask
+    for x in range(colors.shape[0]):
+        for y in range(colors.shape[1]):
+            colors[x, y] = (255, 255, 255)
+    
     return
 
 def runSim():
-    global nextDelta, hardDropQueued, lockQueued, grid, hold, currentPiece, pieceRot, piecePos, holdQueued
+    global nextDelta, hardDropQueued, softDropQueued, lockQueued, grid, hold, currentPiece, pieceRot, piecePos, holdQueued, colors
 
     pGrid = getPGridFromID(currentPiece, pieceRot)
 
     if hardDropQueued:
         executeHardDrop(pGrid, grid, piecePos[0])
         hardDropQueued = False
+        
+    if softDropQueued:
+        executeSoftDrop(pGrid, grid, piecePos[0])
+        print("softdrop")
+        softDropQueued = False
 
     moveTo(pGrid, (piecePos[0]+nextDelta[0], piecePos[1]+nextDelta[1]))
 
@@ -188,7 +200,9 @@ def runSim():
     # Lock piece
     if lockQueued:
         lockQueued = False
-        grid = lockPiece(pGrid, piecePos, grid)
+        lc = lockPiece(pGrid, piecePos, grid)
+        grid = lc['board']
+        colors = lc['colors']
 
     # Holds
     if holdQueued:
@@ -211,11 +225,9 @@ def getPGridFromID(id, rot):
     pGrid = rotVars[id][rot]
     return pGrid
 
-def executeHardDrop(pGrid, board, x):
-    global lockQueued
-
+def executeSoftDrop(pGrid, board, x):
     # Find lowest valid position
-    y = board.h - pGrid.shape[1] # Starts from the top
+    y = piecePos[1] # Starts from the current piece position
     conflict = hasConflict(pGrid, (x, y), board)
 
     # Abort if current spot is taken 
@@ -229,6 +241,11 @@ def executeHardDrop(pGrid, board, x):
             y -= 1
     
     nextDelta[1] = y - piecePos[1]
+
+def executeHardDrop(pGrid, board, x):
+    global lockQueued
+    executeSoftDrop(pGrid, board, x)
+
     lockQueued = True
 
 def onPress(key):
@@ -236,12 +253,15 @@ def onPress(key):
     #print(key)
 
     if key == keyboard.Key.left:
-        shiftBy(-1)
+        shiftBy(-1, 0)
     if key == keyboard.Key.right:
-        shiftBy(1)
+        shiftBy(1, 0)
     
     if key == keyboard.Key.space:
         hardDrop()
+        
+    if key == keyboard.Key.down:
+        softDrop()
     
     if key == keyboard.Key.up:
         rotateBy(1)
@@ -256,12 +276,17 @@ def onPress(key):
 
 # Controls ---------
 
-def shiftBy(amount):
-    nextDelta[0] = amount
+def shiftBy(x, y):
+    nextDelta[0] = x
+    nextDelta[1] = y
 
 def hardDrop():
     global hardDropQueued
     hardDropQueued = True
+
+def softDrop():
+    global softDropQueued
+    softDropQueued = True
 
 def rotateBy(turns):
     global pieceRot
@@ -285,7 +310,10 @@ def lockPiece(pGrid, pos, board):
     for x in range(pGrid.shape[0]):
         for y in range(pGrid.shape[1]):
             if pGrid[x, y] > 0:
-                board.set(pGrid[x, y], pos[0] + x, pos[1] + y)
+                bx = pos[0]+x
+                by = pos[1]+y
+                board.set(pGrid[x, y], bx, by)
+                colors[bx, by] = pieceCols[currentPiece] # I hope current piece isnt inaccurate here
     
     currentPiece = queue.pop(0)
     regenerateQueue()
@@ -295,7 +323,7 @@ def lockPiece(pGrid, pos, board):
 
     lc = lineClear(board)
 
-    return lc['board']
+    return lc
 
 def drawPiece():
     global currentPiece, bag
@@ -352,6 +380,7 @@ def lineClear(grid, sat=None):
             return {'board' : grid, 'clears' : 0, 'lines' : []}
 
     postClear = tetrisCore.Board()
+    postCol = np.empty(shape=colors.shape, dtype=object)
     linesCleared = 0
     lines = []
     
@@ -369,11 +398,12 @@ def lineClear(grid, sat=None):
             # put line into post clear grid
             for x in range(grid.w):
                 postClear.set(grid.get(x, y), x, y - linesCleared)
+                postCol[x, y - linesCleared] = colors[x, y]
 
     if (linesCleared == 4):
         print("Tetris!")
 
-    return {'board' : postClear, 'clears' : linesCleared, 'lines' : lines}
+    return {'board' : postClear, 'clears' : linesCleared, 'lines' : lines, 'colors' : postCol}
 
 if __name__ == '__main__':
     init(None)

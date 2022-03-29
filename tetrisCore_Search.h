@@ -9,6 +9,7 @@ typedef struct {
     int score;
     int inherScore;
     int hold;
+    int slide;
 } moveset;
 
 typedef struct {
@@ -35,8 +36,8 @@ typedef struct {
 // If the grid, pieces, depth, bag, and inherited score are the same
 
 static moveset search(BoardObject *self, int *queue, int levelsLeft, int hold, int iScore);
-static moveResult *makePlay(BoardObject *board, int x, int r, int p);
-static moveset *searchSub(BoardObject *board, int *queue, int levelsLeft, int hold, int x, int r, int iScore);
+static moveResult *makePlay(BoardObject *board, int x, int r, int slide, int p);
+static moveset *searchSub(BoardObject *board, int *queue, int levelsLeft, int hold, int x, int r, int slide, int iScore);
 
 static int calcScore(BoardObject *board);
 static int calcInherScore(BoardObject *board, lcReturn lc);
@@ -48,6 +49,7 @@ PyObject *Board_search(BoardObject *self, PyObject *args);
 static cacheMap * genCacheMap(unsigned len);
 static void clearCache(cacheMap *cMap);
 static void destroyCacheEntry(cacheEntry *ent);
+void dumpState(moveResult *res);
 
 void Search_init();
 

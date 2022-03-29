@@ -1,7 +1,7 @@
 import time
 import tracemalloc
 import tetrisCore
-import yep
+# import yep
 
 tracemalloc.start(25)
 tetrisCore.init()
@@ -22,12 +22,14 @@ board = tetrisCore.Board()
 # print(board)
 # print(board2)
 
-yep.start("d3search.prof")
+# yep.start("d3search.prof")
 
 tetrisCore.setBag([0, 5, 6])
-board.search([1, 2, 3, 4], 4)
+board.search([1, 2, 3], 4)
 
-yep.stop()
+board.search([4, 5], 1)
+
+# yep.stop()
 
 print("All instructions executed!")
 

@@ -20,7 +20,7 @@ ARD = 0.17
 ARS = 0.05
 ARC = 0.1 # compensation
 
-searchDepth = 3
+searchDepth = 4
 
 firstBlock = True
 logData = False
@@ -36,6 +36,8 @@ MoveInput = collections.namedtuple('MoveInput', 'delta rot board score iScore li
 
 tetroMarginBuffer = []
 tetroRidgeBuffer = []
+lockstep = True
+stepPermit = False
 
 
 def main():
@@ -86,6 +88,15 @@ def calculate():
     global started
     if keyboard.is_pressed('`'):
         started = True
+
+    # Press A to go forwards
+    global stepPermit
+    if lockstep:
+        if keyboard.is_pressed('a'):
+            stepPermit = True
+        if not stepPermit:
+               return
+        stepPermit = False
 
     # # Screengrab for positioning
     # if keyboard.is_pressed('1'):
@@ -163,6 +174,8 @@ def calculate():
     xDest = moveset[0]
     rot = moveset[1]
     willHold = moveset[2]
+    slide = moveset[3]
+    
     measure1 = time.time()-measure1
     
     measure2 = time.time()
@@ -184,8 +197,17 @@ def calculate():
         holdPiece()
 
     delta = xDest - spawnPos[0]
-    move(delta, rot)
-    hardDrop()
+    move([delta, 0], rot)
+    
+    print("Slide: "+str(slide))
+    print("Holes: "+str(grid.holes))
+    
+    if (slide == 0):
+        hardDrop()
+    else:
+        softDrop()
+        move([slide, 0], 0)
+        hardDrop()
 
     #time.sleep(1)
 
@@ -208,6 +230,17 @@ def hardDrop():
     wait(hardDropLatency)
     return
 
+def softDrop():
+    if source == SCREEN_CAPTURE:
+        ping('down')
+        
+    elif source == INTERNAL_SIM:
+        tetrisSim.softDrop()
+        tetrisSim.runSim()
+    
+    wait(hardDropLatency) # whatever
+    return
+
 def holdPiece():
     if source == SCREEN_CAPTURE:
         ping('c')
@@ -218,6 +251,8 @@ def holdPiece():
     wait(holdLatency)
 
 def move(delta, rot):
+    dx = delta[0]
+    dy = delta[1]
     if source == SCREEN_CAPTURE:
         if rot == 1:
             ping('up')
@@ -227,12 +262,12 @@ def move(delta, rot):
         if rot == 3:
             ping('z')
 
-        if delta != 0:
+        if dx != 0:
             key = 'right'
-            if delta < 0:
+            if dx < 0:
                 key = 'left'
             
-            absDelta = abs(delta)
+            absDelta = abs(dx)
             while absDelta > 0:
                 ping(key)
                 absDelta -= 1
@@ -249,8 +284,8 @@ def move(delta, rot):
             tetrisSim.rotateBy(-1)
             tetrisSim.runSim()
 
-        if delta != 0:
-            tetrisSim.shiftBy(delta)
+        if dx != 0 or dy != 0:
+            tetrisSim.shiftBy(dx, dy)
             tetrisSim.runSim()
         
 
